@@ -39,11 +39,15 @@ else
 fi
 
 # check architecture
-if [ "$ARCH" != "arm" ] && [ "$ARCH" != "arm64" ] && [ "$ARCH" != "x86" ] && [ "$ARCH" != "x64" ]; then
-  abort "! Unsupported platform: $ARCH"
-else
-  ui_print "- Device platform: $ARCH"
+if [ "$ARCH" = "x86" ] || [ "$ARCH" = "x64" ]; then
+  abort "! x86 / x86_64 devices are not supported by VexZygisk"
 fi
+
+if [ "$ARCH" != "arm" ] && [ "$ARCH" != "arm64" ]; then
+  abort "! Unsupported platform: $ARCH"
+fi
+
+ui_print "- Device platform: $ARCH"
 
 ui_print "- Extracting verify.sh"
 unzip -o "$ZIPFILE" 'verify.sh' -d "$TMPDIR" >&2
@@ -104,20 +108,10 @@ unzip -o "$ZIPFILE" "webroot/*" -x "*.sha256" -d "$MODPATH"
 #         use, so injecting it only costs performance and stability for no real gain. The
 #         32-bit binaries are therefore installed on 32-bit only devices solely.
 case "$ARCH" in
-  x86)
-    ARCH_BITS=32
-    ARCH_LIB_DIR=lib
-    ARCH_ABI=x86
-    ;;
   arm)
     ARCH_BITS=32
     ARCH_LIB_DIR=lib
     ARCH_ABI=armeabi-v7a
-    ;;
-  x64)
-    ARCH_BITS=64
-    ARCH_LIB_DIR=lib64
-    ARCH_ABI=x86_64
     ;;
   *)
     ARCH_BITS=64

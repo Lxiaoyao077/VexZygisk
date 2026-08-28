@@ -101,10 +101,6 @@ mkdir "$MODPATH/webroot"
 ui_print "- Extracting webroot"
 unzip -o "$ZIPFILE" "webroot/*" -x "*.sha256" -d "$MODPATH"
 
-# INFO: Only the Zygote matching the device's primary ABI gets injected. Practically every
-#         modern device is 64-bit and ships a secondary 32-bit Zygote that barely sees any
-#         use, so injecting it only costs performance and stability for no real gain. The
-#         32-bit binaries are therefore installed on 32-bit only devices solely.
 case "$ARCH" in
   arm)
     ARCH_BITS=32

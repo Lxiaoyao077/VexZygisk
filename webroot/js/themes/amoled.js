@@ -2,7 +2,6 @@ import { setDarkNav } from './darkNavbar.js'
 
 const rootCss = document.querySelector(':root')
 
-/* INFO: Amoled is the only theme, so it is applied unconditionally at startup */
 export function setAmoled() {
   rootCss.style.setProperty('--background', '#000000')
   rootCss.style.setProperty('--font', '#d9d9d9')

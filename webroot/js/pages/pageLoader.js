@@ -19,20 +19,17 @@ const loadedPageView = []
 /* INFO: Prevent overlapping page transitions when users tap navigation rapidly. */
 let isPageTransitioning = false
 
-/* INFO: Translations shipped with the module, without the .json suffix */
 const availableLanguages = [
   'ar_EG', 'de_DE', 'en_US', 'es_AR', 'id_ID', 'it_IT', 'ja_JP', 'ko_KR',
   'pl_PL', 'pt_BR', 'ru_RU', 'tr_TR', 'uk_UA', 'vi_VN', 'zh_CN'
 ]
 
-/* INFO: Some languages only ship one regional translation, e.g. pt-PT falls back to pt-BR */
 const languageFallbacks = {
   ar: 'ar_EG',
   es: 'es_AR',
   pt: 'pt_BR'
 }
 
-/* INFO: The WebView reports the device locales, so the language follows the system */
 function detectLanguage() {
   const locales = [ ...(navigator.languages || []), navigator.language ]
 

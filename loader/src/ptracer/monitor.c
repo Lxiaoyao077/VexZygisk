@@ -20,11 +20,6 @@
 
 #define STOPPED_WITH(sig, event) (WIFSTOPPED(sigchld_status) && (sigchld_status >> 8 == ((sig) | ((event) << 8))))
 
-/* INFO: A monitor is built for a single bitness and only ever injects the Zygote
-           sharing it. Modern devices boot a 64-bit primary Zygote and a secondary
-           32-bit one which is barely used anymore; injecting the latter adds nothing
-           but instability and extra ptrace work, hence it is skipped. Devices that
-           are 32-bit only still get full support through the 32-bit monitor. */
 #ifdef __LP64__
   #define MONITOR_ABI "64"
   #define APP_PROCESS_NAME "/system/bin/app_process64"

@@ -6,7 +6,6 @@ setAmoled()
 
 const ConfigState = JSON.parse(localStorage.getItem('/VexZygisk/webui_config') || '{}')
 
-/* INFO: Arabic is the only shipped right-to-left language */
 document.getElementById('main_html').setAttribute('dir', detectedLanguage === 'ar_EG' ? 'rtl' : 'ltr')
 
 if (!ConfigState.disableFullscreen) fullScreen(true)

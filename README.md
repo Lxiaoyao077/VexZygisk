@@ -1,8 +1,6 @@
 # VexZygisk
 
-[Español(Argentina)](/READMEs/README_es-AR.md)|[Bahasa Indonesia](/READMEs/README_id-ID.md)|[Português Brasileiro](/READMEs/README_pt-BR.md)|[Українська](/READMEs/README_uk-UA.md)|[Tiếng Việt](/READMEs/README_vi-VN.md)|
-
-VexZygisk is a fork of Zygisk Next, a standalone implementation of Zygisk, providing Zygisk API support for KernelSU.
+VexZygisk is a standalone implementation of Zygisk for KernelSU, based on ReZygisk.
 
 The codebase has been rewritten to C entirely, bringing not only a much cleaner codebase that is easier to follow, but also a lighter binaries that are also faster. Custom linkers also have been introduced to future-proof VexZygisk against future detections, not using system linker at all in normal circunstances, defeating any linker-based detection.
 
@@ -10,7 +8,7 @@ The codebase has been rewritten to C entirely, bringing not only a much cleaner 
 
 The latest releases of Zygisk Next are not open-source, reserving entirely the code for its developers. Not only does that limit our ability to contribute to the project, but also impossibilities the audit of the code, which is a major security concern, as Zygisk Next is a module that runs with superuser (root) privileges, having access to the entire system.
 
-The Zygisk Next developers are famous and trusted in the Android community, however, this doesn't mean that the code is not malicious or vulnerable. We (PerformanC) understand they have their reasons to keep the code closed-source, but we believe the contrary.
+The Zygisk Next developers are famous and trusted in the Android community, however, this doesn't mean that the code is not malicious or vulnerable. There may be good reasons to keep it closed-source, but this project takes the opposite view.
 
 ## Advantages
 
@@ -53,25 +51,13 @@ After rebooting, you can verify if VexZygisk is working properly by checking the
 > [!NOTE]
 > Only the Zygote matching the bitness of your device's primary ABI is injected. On 64-bit devices the secondary 32-bit Zygote is left untouched, as it is rarely used and injecting it brings no benefit; 32-bit only devices keep full support.
 
-## Translation
-
-There are currently two different ways to contribute translations for VexZygisk:
-
-- For translations of the README, you can create a new file in the `READMEs` folder, following the naming convention of `README_<language>.md`, where `<language>` is the language code (e.g., `README_pt-BR.md` for Brazilian Portuguese), and open a pull request to the `main` branch with your changes.
-- For translations of the VexZygisk WebUI, you should first contribute to our [Crowdin](https://crowdin.com/project/rezygisk). Once approved retrieve the `.json` file from there and open a pull request with your changes -- adding the `.json` file to the `webroot/lang` folder and your credits to the `TRANSLATOR.md` file, in alphabetic order.
-
 ## Support
 
-For any question related to VexZygisk or other PerformanC projects, feel free to join any of the following channels below:
-
-- Discord Channel: [PerformanC](https://discord.gg/uPveNfTuCJ)
-- VexZygisk Telegram Channel: [@rezygisk](https://t.me/rezygisk)
-- PerformanC Telegram Channel: [@performancorg](https://t.me/performancorg)
-- PerformanC Signal Group: [@performanc](https://signal.group/#CjQKID3SS8N5y4lXj3VjjGxVJnzNsTIuaYZjj3i8UhipAS0gEhAedxPjT5WjbOs6FUuXptcT)
+If something is not working, open an [Issue](https://github.com/Lxiaoyao077/VexZygisk/issues) with a log from the `debug` build attached.
 
 ## Contribution
 
-It is mandatory to follow PerformanC's [Contribution Guidelines](https://github.com/PerformanC/contributing) to contribute to VexZygisk. Following its Security Policy, Code of Conduct, and syntax standard.
+Pull requests are welcome. Keep the existing code style and test your changes with a `debug` build before submitting.
 
 ## License
 

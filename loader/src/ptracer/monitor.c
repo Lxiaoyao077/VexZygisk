@@ -470,6 +470,17 @@ static bool ensure_daemon_created(bool is_64bit) {
 #define APP_PROCESS_64 APP_PROCESS "64"
 #define APP_PROCESS_32 APP_PROCESS "32"
 
+/* INFO: Every monitor binary is built for a single bitness, so it can only ever inject
+           the Zygote sharing it. Modern devices boot a 64-bit primary Zygote and a
+           secondary 32-bit one which is barely used anymore; injecting the latter adds
+           nothing but instability and extra ptrace work, hence it is skipped. Devices
+           that are 32-bit only still get full support through the 32-bit monitor. */
+#ifdef __LP64__
+  #define MONITOR_IS_64BIT true
+#else
+  #define MONITOR_IS_64BIT false
+#endif
+
 #define PRE_INJECT(abi, is_64)                                        \
   if (strcmp(program, APP_PROCESS_ ## abi) == 0) {                    \
     tracer = "./bin/zygisk-ptrace" # abi;                             \
@@ -699,9 +710,15 @@ void sigchld_listener_callback() {
               break;
             }
 
-            PRE_INJECT(64, true)
-            PRE_INJECT(32, false)
-            PRE_INJECT_TANGO
+            if (MONITOR_IS_64BIT) {
+              PRE_INJECT(64, true)
+
+              if (tracer == NULL && strcmp(program, APP_PROCESS_32) == 0)
+                LOGD("Skipping 32-bit Zygote %d", pid);
+            } else {
+              PRE_INJECT(32, false)
+              PRE_INJECT_TANGO
+            }
 
             if (tracer != NULL) {
               LOGD("Stopping %d (program: %s, tracer: %s, tango: %s)", pid, program, tracer, is_tango ? "yes" : "no");

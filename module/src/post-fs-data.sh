@@ -35,24 +35,13 @@ create_sys_perm $TMP_PATH
 
 sh /data/adb/post-fs-data.d/rezygisk.sh
 
-# INFO: Utilize the one with the biggest output, as some devices with Tango have the full list
-#         in ro.product.cpu.abilist but others only have a subset there, and the full list in
-#         ro.system.product.cpu.abilist
-CPU_ABIS_PROP1=$(getprop ro.system.product.cpu.abilist)
-CPU_ABIS_PROP2=$(getprop ro.product.cpu.abilist)
-
-if [ "${#CPU_ABIS_PROP2}" -gt "${#CPU_ABIS_PROP1}" ]; then
-  CPU_ABIS=$CPU_ABIS_PROP2
-else
-  CPU_ABIS=$CPU_ABIS_PROP1
-fi
-
-if [[ "$CPU_ABIS" == *"arm64-v8a"* || "$CPU_ABIS" == *"x86_64"* ]]; then
-  ./bin/zygisk-ptrace64 monitor &
-else
-  # INFO: Device is 32-bit only
-
-  ./bin/zygisk-ptrace32 monitor &
+# INFO: A single monitor is started, and it matches the bitness of what got installed. The
+#         64-bit build is preferred whenever present, since it is the one shipped to every
+#         64-bit device. 32-bit only devices fall back to the 32-bit build.
+if [ -f "$MODDIR/bin/zygisk-ptrace64" ]; then
+  "$MODDIR/bin/zygisk-ptrace64" monitor &
+elif [ -f "$MODDIR/bin/zygisk-ptrace32" ]; then
+  "$MODDIR/bin/zygisk-ptrace32" monitor &
 fi
 
 exit 0

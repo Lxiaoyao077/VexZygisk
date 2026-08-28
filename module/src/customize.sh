@@ -123,95 +123,51 @@ mkdir "$MODPATH/webroot"
 ui_print "- Extracting webroot"
 unzip -o "$ZIPFILE" "webroot/*" -x "*.sha256" -d "$MODPATH"
 
-# INFO: Utilize the one with the biggest output, as some devices with Tango have the full list
-#         in ro.product.cpu.abilist but others only have a subset there, and the full list in
-#         ro.system.product.cpu.abilist
-CPU_ABIS_PROP1=$(getprop ro.system.product.cpu.abilist)
-CPU_ABIS_PROP2=$(getprop ro.product.cpu.abilist)
+# INFO: Only the Zygote matching the device's primary ABI gets injected. Practically every
+#         modern device is 64-bit and ships a secondary 32-bit Zygote that barely sees any
+#         use, so injecting it only costs performance and stability for no real gain. The
+#         32-bit binaries are therefore installed on 32-bit only devices solely.
+case "$ARCH" in
+  x86)
+    ARCH_BITS=32
+    ARCH_LIB_DIR=lib
+    ARCH_ABI=x86
+    ;;
+  arm)
+    ARCH_BITS=32
+    ARCH_LIB_DIR=lib
+    ARCH_ABI=armeabi-v7a
+    ;;
+  x64)
+    ARCH_BITS=64
+    ARCH_LIB_DIR=lib64
+    ARCH_ABI=x86_64
+    ;;
+  *)
+    ARCH_BITS=64
+    ARCH_LIB_DIR=lib64
+    ARCH_ABI=arm64-v8a
+    ;;
+esac
 
-if [ "${#CPU_ABIS_PROP2}" -gt "${#CPU_ABIS_PROP1}" ]; then
-  CPU_ABIS=$CPU_ABIS_PROP2
+if [ "$ARCH_BITS" = 32 ]; then
+  ui_print "- Device is 32-bit only"
 else
-  CPU_ABIS=$CPU_ABIS_PROP1
+  ui_print "- Device is 64-bit, 32-bit Zygote will not be injected"
 fi
 
-SUPPORTS_32BIT=false
-SUPPORTS_64BIT=false
+ui_print "- Extracting $ARCH_ABI libraries"
+mkdir "$MODPATH/$ARCH_LIB_DIR"
 
-if [[ "$CPU_ABIS" == *"x86"* && "$CPU_ABIS" != "x86_64" || "$CPU_ABIS" == *"armeabi"* ]]; then
-  SUPPORTS_32BIT=true
-  ui_print "- Device supports 32-bit"
-fi
-
-if [[ "$CPU_ABIS" == *"x86_64"* || "$CPU_ABIS" == *"arm64-v8a"* ]]; then
-  SUPPORTS_64BIT=true
-  ui_print "- Device supports 64-bit"
-fi
-
-if [ "$SUPPORTS_32BIT" = true ]; then
-  mkdir "$MODPATH/lib"
-fi
-
-if [ "$SUPPORTS_64BIT" = true ]; then
-  mkdir "$MODPATH/lib64"
-fi
-
-if [ "$ARCH" = "x86" ] || [ "$ARCH" = "x64" ]; then
-  if [ "$SUPPORTS_32BIT" = true ]; then
-    ui_print "- Extracting x86 libraries"
-    extract "$ZIPFILE" 'bin/x86/zygiskd' "$MODPATH/bin" true
-    mv "$MODPATH/bin/zygiskd" "$MODPATH/bin/zygiskd32"
-    extract "$ZIPFILE" 'lib/x86/libzygisk.so' "$MODPATH/lib" true
-    extract "$ZIPFILE" 'lib/x86/libzygisk_ptrace.so' "$MODPATH/bin" true
-    mv "$MODPATH/bin/libzygisk_ptrace.so" "$MODPATH/bin/zygisk-ptrace32"
-
-    extract "$ZIPFILE" 'machikado.x86' "$MODPATH" true
-  fi
-
-  if [ "$SUPPORTS_64BIT" = true ]; then
-    ui_print "- Extracting x64 libraries"
-    extract "$ZIPFILE" 'bin/x86_64/zygiskd' "$MODPATH/bin" true
-    mv "$MODPATH/bin/zygiskd" "$MODPATH/bin/zygiskd64"
-    extract "$ZIPFILE" 'lib/x86_64/libzygisk.so' "$MODPATH/lib64" true
-    extract "$ZIPFILE" 'lib/x86_64/libzygisk_ptrace.so' "$MODPATH/bin" true
-    mv "$MODPATH/bin/libzygisk_ptrace.so" "$MODPATH/bin/zygisk-ptrace64"
-
-    extract "$ZIPFILE" 'machikado.x86_64' "$MODPATH" true
-  fi
-else
-  if [ "$SUPPORTS_32BIT" = true ]; then
-    ui_print "- Extracting arm libraries"
-    extract "$ZIPFILE" 'bin/armeabi-v7a/zygiskd' "$MODPATH/bin" true
-    mv "$MODPATH/bin/zygiskd" "$MODPATH/bin/zygiskd32"
-    extract "$ZIPFILE" 'lib/armeabi-v7a/libzygisk.so' "$MODPATH/lib" true
-    extract "$ZIPFILE" 'lib/armeabi-v7a/libzygisk_ptrace.so' "$MODPATH/bin" true
-    mv "$MODPATH/bin/libzygisk_ptrace.so" "$MODPATH/bin/zygisk-ptrace32"
-
-    extract "$ZIPFILE" 'machikado.arm' "$MODPATH" true
-  fi
-
-  if [ "$SUPPORTS_64BIT" = true ]; then
-    ui_print "- Extracting arm64 libraries"
-    extract "$ZIPFILE" 'bin/arm64-v8a/zygiskd' "$MODPATH/bin" true
-    mv "$MODPATH/bin/zygiskd" "$MODPATH/bin/zygiskd64"
-    extract "$ZIPFILE" 'lib/arm64-v8a/libzygisk.so' "$MODPATH/lib64" true
-    extract "$ZIPFILE" 'lib/arm64-v8a/libzygisk_ptrace.so' "$MODPATH/bin" true
-    mv "$MODPATH/bin/libzygisk_ptrace.so" "$MODPATH/bin/zygisk-ptrace64"
-
-    extract "$ZIPFILE" 'machikado.arm64' "$MODPATH" true
-  fi
-fi
+extract "$ZIPFILE" "bin/$ARCH_ABI/zygiskd" "$MODPATH/bin" true
+mv "$MODPATH/bin/zygiskd" "$MODPATH/bin/zygiskd$ARCH_BITS"
+extract "$ZIPFILE" "lib/$ARCH_ABI/libzygisk.so" "$MODPATH/$ARCH_LIB_DIR" true
+extract "$ZIPFILE" "lib/$ARCH_ABI/libzygisk_ptrace.so" "$MODPATH/bin" true
+mv "$MODPATH/bin/libzygisk_ptrace.so" "$MODPATH/bin/zygisk-ptrace$ARCH_BITS"
 
 ui_print "- Setting permissions"
 set_perm_recursive "$MODPATH/bin" 0 0 0755 0755
-
-if [ "$SUPPORTS_32BIT" = true ]; then
-  set_perm_recursive "$MODPATH/lib" 0 0 0755 0644 u:object_r:system_lib_file:s0
-fi
-
-if [ "$SUPPORTS_64BIT" = true ]; then
-  set_perm_recursive "$MODPATH/lib64" 0 0 0755 0644 u:object_r:system_lib_file:s0
-fi
+set_perm_recursive "$MODPATH/$ARCH_LIB_DIR" 0 0 0755 0644 u:object_r:system_lib_file:s0
 
 # If Huawei's Maple is enabled, system_server is created with a special way which is out of Zygisk's control
 HUAWEI_MAPLE_ENABLED=$(grep_prop ro.maple.enable)

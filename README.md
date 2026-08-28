@@ -51,7 +51,10 @@ After flashing, check the installation logs to ensure there are no errors, and i
 
 ### 3. Verify the installation
 
-After rebooting, you can verify if ReZygisk is working properly by checking the module description in the `Modules` section of your root manager. The description should indicate that the necessary daemons are running. For example, if your environment supports both 64-bit and 32-bit, it should look similar to this: `[Monitor: ✅, ReZygisk 64-bit: ✅, ReZygisk 32-bit: ✅] Standalone implementation of Zygisk.`
+After rebooting, you can verify if ReZygisk is working properly by checking the module description in the `Modules` section of your root manager. The description should indicate that the necessary daemons are running, and it should look similar to this: `[Monitor: ✅, ReZygisk 64-bit: ✅] Standalone implementation of Zygisk.`
+
+> [!NOTE]
+> Only the Zygote matching the bitness of your device's primary ABI is injected. On 64-bit devices the secondary 32-bit Zygote is left untouched, as it is rarely used and injecting it brings no benefit; 32-bit only devices keep full support.
 
 ## Translation
 

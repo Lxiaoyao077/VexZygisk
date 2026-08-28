@@ -57,7 +57,7 @@ export function getDevelopmentExecResponse(command) {
     return developmentResponse[command]
   }
 
-  if (command.includes('printf % ; if test -f')) {
+  if (command.includes('/module.prop')) {
     return developmentResponse['module_lister']
   }
 

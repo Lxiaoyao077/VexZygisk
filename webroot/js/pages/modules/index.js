@@ -23,7 +23,7 @@ async function _getModuleNames(modules) {
   const fullCommand = modules.map((mod) => {
     const propPath = `/data/adb/modules/${mod.id}/module.prop`
 
-    return `printf % ; if test -f "${propPath}"; then /system/bin/grep '^name=' "${propPath}" | /system/bin/cut -d '=' -f 2- 2>/dev/null || true; else true; fi ; printf "\\n"`
+    return `if test -f "${propPath}"; then /system/bin/grep '^name=' "${propPath}" | /system/bin/cut -d '=' -f 2- 2>/dev/null || true; else true; fi ; printf "\\n"`
   }).join(' ; ')
 
   const result = await exec(fullCommand)

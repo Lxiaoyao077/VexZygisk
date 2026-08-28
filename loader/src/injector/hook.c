@@ -943,8 +943,6 @@ static bool load_modules_only(void) {
     return false;
   }
 
-  /* INFO: Reset the counter first: a second pass must not write past the fresh
-             buffer or leak the previous allocation. */
   zygisk_module_length = 0;
 
   zygisk_modules = (struct rezygisk_module *)malloc(ms.modules_count * sizeof(struct rezygisk_module));

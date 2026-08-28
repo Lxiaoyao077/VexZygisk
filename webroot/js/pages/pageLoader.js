@@ -22,7 +22,8 @@ const availableLanguages = [
 const languageFallbacks = {
   ar: 'ar_EG',
   es: 'es_AR',
-  pt: 'pt_BR'
+  pt: 'pt_BR',
+  zh: 'zh_CN'
 }
 
 function detectLanguage() {
@@ -31,12 +32,12 @@ function detectLanguage() {
   for (const locale of locales) {
     if (typeof locale !== 'string') continue;
 
-    const normalized = locale.replace('-', '_')
-    if (availableLanguages.includes(normalized)) return normalized
+    const parts = locale.split(/[-_]/)
+    const normalized = `${parts[0]}_${parts[parts.length - 1].toUpperCase()}`
 
-    const primary = normalized.split('_')[0]
-    if (availableLanguages.includes(primary)) return primary
-    if (languageFallbacks[primary]) return languageFallbacks[primary]
+    if (availableLanguages.includes(normalized)) return normalized
+    if (availableLanguages.includes(parts[0])) return parts[0]
+    if (languageFallbacks[parts[0]]) return languageFallbacks[parts[0]]
   }
 
   return 'en_US'

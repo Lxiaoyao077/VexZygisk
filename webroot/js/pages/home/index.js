@@ -2,26 +2,11 @@ import { exec, toast } from '../../kernelsu.js'
 
 import { whichCurrentPage } from '../navbar.js'
 import { getStrings } from '../pageLoader.js'
+import { getVexZygiskState } from './state.js'
 
 let rzState = {
   actuallyWorking: 0,
   expectedWorking: 0
-}
-
-async function _getVexZygiskState() {
-  let stateCmd = await exec('/system/bin/cat /data/adb/rezygisk/state.json')
-  if (stateCmd.errno !== 0) {
-    toast('Error getting state of VexZygisk!')
-
-    return;
-  }
-
-  try {
-    const VexZygiskState = JSON.parse(stateCmd.stdout)
-    return VexZygiskState
-  } catch {
-    return null;
-  }
 }
 
 async function _getVersion() {
@@ -69,9 +54,7 @@ async function _getAndroidVersion() {
 }
 
 function _getMonitorStatus(VexZygiskState, strings) {
-  if (VexZygiskState == null) return strings.unknown
-
-  switch (VexZygiskState.monitor.state) {
+  switch (VexZygiskState?.monitor?.state) {
     case '0': return strings.monitor.status.tracing
     case '1': return strings.monitor.status.stopping
     case '2': return strings.monitor.status.stopped
@@ -179,8 +162,10 @@ export async function loadOnceView() {
   document.getElementById('kernel_version_div').innerHTML = await _getKernelString()
   document.getElementById('android_version_div').innerHTML = await _getAndroidVersion()
 
-  const VexZygiskState = await _getVexZygiskState()
+  const VexZygiskState = await getVexZygiskState()
   const strings = await getStrings(whichCurrentPage())
+
+  if (VexZygiskState === null) toast('Error getting state of VexZygisk!')
 
   let root_impl = VexZygiskState ? VexZygiskState.root : null
   if (!root_impl) root_impl = strings.unknown
@@ -195,7 +180,7 @@ export async function loadOnceView() {
 }
 
 export async function load() {
-  const VexZygiskState = await _getVexZygiskState()
+  const VexZygiskState = await getVexZygiskState()
   const strings = await getStrings(whichCurrentPage())
 
   document.getElementById('monitor_status').innerHTML = _getMonitorStatus(VexZygiskState, strings)

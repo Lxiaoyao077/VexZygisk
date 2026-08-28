@@ -31,11 +31,6 @@
           "stopped": "Đã Dừng",
           "exiting": "Đã Thoát",
           "unknown": "Không Xác Định"
-        },
-        "button": {
-          "start": "Chạy",
-          "stop": "Dừng",
-          "pause": "Tạm Dừng"
         }
       }
     },
@@ -46,17 +41,9 @@
     },
     "settings": {
       "title": "Cài đặt",
-      "language": {
-        "title": "Thay đổi ngôn ngữ",
-        "description": "Thay đổi sang ngôn ngữ mới"
-      },
       "fullscreen": {
         "title": "Vô hiệu hóa chế độ toàn màn hình trên WebUI",
         "description": "Tùy chọn này sẽ khiến cho WebUI không còn ở toàn màn hình."
-      },
-      "theme": {
-        "title": "Giao diện WebUI",
-        "description": "Chọn giao diện cho WebUI hiện tại của bạn"
       },
       "font": {
         "title": "Sử dụng phông chữ hệ thống",
@@ -66,18 +53,6 @@
       "WebUIDevelopers": "Những nhà phát triển WebUI",
       "orginalDevelopers": "Những nhà phát triển mô-đun gốc",
       "moduleLicense": "Giấy phép bản quyền mô-đun"
-    },
-    "mini_settings_language": {
-      "title": "Thay đổi ngôn ngữ"
-    },
-    "mini_settings_theme": {
-      "title": "Thay đổi giao diện WebUI",
-      "theme": {
-        "dark": "Giao diện tối",
-        "light": "Giao diện sáng",
-        "amoled": "Giao diện Amoled",
-        "system_based": "Tự động theo hệ thống"
-      }
     }
   },
   "globals": {

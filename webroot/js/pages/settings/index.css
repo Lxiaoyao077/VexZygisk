@@ -8,15 +8,6 @@
   transform: scale(96%);
 }
 
-.language_card {
-  background-color: var(--dim-brigther);
-  font-size: 1.2em;
-  padding: 15px;
-  padding-left: 20px;
-  border-radius: 10px;
-  cursor: pointer;
-}
-
 /* INFO: Code shared with actions page */
 .slider {
   position: absolute;

@@ -31,11 +31,6 @@
           "stopped": "Terhenti",
           "exiting": "Sedang Keluar",
           "unknown": "Tidak diketahui"
-        },
-        "button": {
-          "pause": "Jeda",
-          "stop": "Berhenti",
-          "start": "Mulai"
         }
       }
     },
@@ -46,17 +41,9 @@
     },
     "settings": {
       "title": "Pengaturan",
-      "language": {
-        "title": "Ubah Bahasa",
-        "description": "Ubah bahasa WebUI sesuai yang anda pilih."
-      },
       "fullscreen": {
         "title": "Mematikan mode layar penuh di WebUI",
         "description": "Pilihan ini dapat membuat WebUI tidak menggunakan layar penuh."
-      },
-      "theme": {
-        "title": "Ubah Tema WebUI",
-        "description": "Pilih tema sistem untuk WebUI saat ini."
       },
       "font": {
         "title": "Gunakan Font Sistem",
@@ -66,18 +53,6 @@
       "WebUIDevelopers": "Pengembang WebUI",
       "orginalDevelopers": "Pengembang Modul Asli",
       "moduleLicense": "Lisensi Modul"
-    },
-    "mini_settings_language": {
-      "title": "Ubah Bahasa"
-    },
-    "mini_settings_theme": {
-      "title": "Ubah Tema WebUI",
-      "theme": {
-        "dark": "Mode Gelap",
-        "light": "Mode Terang",
-        "amoled": "Mode Amoled",
-        "system_based": "Mengikuti Tema Sistem"
-      }
     }
   },
   "globals": {

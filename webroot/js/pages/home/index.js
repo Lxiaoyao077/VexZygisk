@@ -182,12 +182,6 @@ export async function loadOnceView() {
   loading_screen.style.display = 'none'
 }
 
-export async function onceViewAfterUpdate() {
-  const VexZygiskState = await _getVexZygiskState()
-  const strings = await getStrings(whichCurrentPage())
-  _updateDynamicElement(false, VexZygiskState, strings)
-}
-
 export async function load() {
 
 }

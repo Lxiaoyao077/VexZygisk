@@ -93,10 +93,6 @@ export async function loadOnceView() {
   _updateDynamicElement()
 }
 
-export async function onceViewAfterUpdate() {
-  _updateDynamicElement()
-}
-
 export async function load() {
 
 }

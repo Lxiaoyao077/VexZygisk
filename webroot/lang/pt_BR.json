@@ -31,11 +31,6 @@
           "stopped": "Parado",
           "exiting": "Desligando",
           "unknown": "Desconhecido"
-        },
-        "button": {
-          "start": "Iniciar",
-          "stop": "Parar",
-          "pause": "Pausar"
         }
       }
     },
@@ -46,17 +41,9 @@
     },
     "settings": {
       "title": "Configurações",
-      "language": {
-        "title": "Alterar a língua",
-        "description": "Mudar a linguagem da WebUI para a selecionada."
-      },
       "fullscreen": {
         "title": "Desabilitar modo de tela cheia na WebUI",
         "description": "Essa opção fai fazer a WebUI não ocupar a tela inteira."
-      },
-      "theme": {
-        "title": "Mudar o tema da WebUI",
-        "description": "Escolha um tema do sistema para a atual WebUI."
       },
       "font": {
         "title": "Usar a fonte do sistema",
@@ -66,18 +53,6 @@
       "WebUIDevelopers": "Desenvolvedor(es) de WebUI",
       "orginalDevelopers": "Desenvolvedor(es) do Módulo Original",
       "moduleLicense": "Licença do Módulo"
-    },
-    "mini_settings_language": {
-      "title": "Alterar a língua"
-    },
-    "mini_settings_theme": {
-      "title": "Mudar tema da WebUI",
-      "theme": {
-        "dark": "Tema Escuro",
-        "light": "Tema Claro",
-        "amoled": "Tema AMOLED",
-        "system_based": "Tema do Sistema"
-      }
     }
   },
   "globals": {

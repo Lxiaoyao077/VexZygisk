@@ -31,11 +31,6 @@
           "stopped": "Durduruldu",
           "exiting": "Çıkılıyor",
           "unknown": "Bilinmiyor"
-        },
-        "button": {
-          "start": "Başlat",
-          "stop": "Durdur",
-          "pause": "Duraklat"
         }
       }
     },
@@ -46,17 +41,9 @@
     },
     "settings": {
       "title": "Ayarlar",
-      "language": {
-        "title": "Dil değiştir",
-        "description": "Web arayüzünün dilini seçilen dille değiştirin."
-      },
       "fullscreen": {
         "title": "WebUI'de tam ekran modunu devre dışı bırak",
         "description": "Bu seçenek, WebUI'nin ekranın tamamını kaplamamasını sağlayacaktır."
-      },
-      "theme": {
-        "title": "WebUI temasını değiştir",
-        "description": "Mevcut WebUI için sistem temanızı seçin"
       },
       "font": {
         "title": "Sistem yazı tipini etkinleştir",
@@ -66,18 +53,6 @@
       "WebUIDevelopers": "WebUI Geliştirici(leri)",
       "orginalDevelopers": "Orijinal Modül Geliştirici(leri)",
       "moduleLicense": "Modül Lisansı"
-    },
-    "mini_settings_language": {
-      "title": "Dili değiştir"
-    },
-    "mini_settings_theme": {
-      "title": "WebUI temasını değiştir",
-      "theme": {
-        "dark": "Karanlık Tema",
-        "light": "Açık Tema",
-        "amoled": "Amoled Tema",
-        "system_based": "Sisteme Göre Tema"
-      }
     }
   },
   "globals": {

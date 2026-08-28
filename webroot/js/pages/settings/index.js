@@ -1,4 +1,3 @@
-import { loadPage } from '../pageLoader.js'
 import utils from '../utils.js'
 import { fullScreen } from '../../kernelsu.js'
 
@@ -11,10 +10,6 @@ export async function loadOnce() {
 }
 
 export async function loadOnceView() {
-
-}
-
-export async function onceViewAfterUpdate() {
 
 }
 
@@ -31,14 +26,6 @@ export async function load() {
   } else {
     ConfigState = JSON.parse(webui_config)
   }
-
-  utils.addListener(document.getElementById('lang_page_toggle'), 'click', () => {
-    loadPage('mini_settings_language')
-  })
-
-  utils.addListener(document.getElementById('theme_page_toggle'), 'click', () => {
-    loadPage('mini_settings_theme')
-  })
 
   const rz_webui_fullscreen_switch = document.getElementById('rz_webui_fullscreen_switch')
   if (ConfigState.disableFullscreen) rz_webui_fullscreen_switch.checked = true

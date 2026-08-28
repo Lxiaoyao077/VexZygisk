@@ -57,23 +57,3 @@ export async function runMainPageTransition(currentPageContent, nextPageContent,
   currentPageContent.style.display = 'none'
   nextPageContent.style.display = 'block'
 }
-
-export async function runMiniPageEnter(pageSpecificContent) {
-  /* INFO: Mini pages slide in as an overlay from the right side. */
-  pageSpecificContent.classList.add('page_loader_mini_in')
-  pageSpecificContent.style.display = 'block'
-
-  await waitForAnimationEnd(pageSpecificContent)
-
-  pageSpecificContent.classList.remove('page_loader_mini_in')
-}
-
-export async function runMiniPageLeave(pageSpecificContent) {
-  /* INFO: Mini pages slide out to the right and then become hidden. */
-  pageSpecificContent.classList.add('page_loader_mini_out')
-
-  await waitForAnimationEnd(pageSpecificContent)
-
-  pageSpecificContent.classList.remove('page_loader_mini_out')
-  pageSpecificContent.style.display = 'none'
-}

@@ -1,15 +1,13 @@
 import { exec, fullScreen } from './kernelsu.js'
-import { setDark } from './themes/dark.js'
-import { setThemeData, themeList } from './themes/main.js'
-import { setLight } from './themes/light.js'
-import { loadPage } from './pages/pageLoader.js'
+import { setAmoled } from './themes/amoled.js'
+import { detectedLanguage } from './pages/pageLoader.js'
 
-/* INFO: This sets the default theme to system if not set */
-let sys_theme = localStorage.getItem('/VexZygisk/theme')
-if (!sys_theme) sys_theme = setThemeData('system')
-themeList[sys_theme](true)
+setAmoled()
 
 const ConfigState = JSON.parse(localStorage.getItem('/VexZygisk/webui_config') || '{}')
+
+/* INFO: Arabic is the only shipped right-to-left language */
+document.getElementById('main_html').setAttribute('dir', detectedLanguage === 'ar_EG' ? 'rtl' : 'ltr')
 
 if (!ConfigState.disableFullscreen) fullScreen(true)
 
@@ -35,11 +33,3 @@ document.addEventListener('click', async (event) => {
 
   if (ptrace64Cmd.errno !== 0) return window.open(`https://${getLink}`, "_blank", 'toolbar=0,location=0,menubar=0')
 }, false)
-
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
-  if (sys_theme !== 'system') return
-
-  const newColorScheme = event.matches ? 'dark' : 'light'
-  if (newColorScheme === 'dark') setDark()
-  else if (newColorScheme === 'light') setLight()
-})

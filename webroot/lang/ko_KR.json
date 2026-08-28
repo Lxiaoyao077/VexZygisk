@@ -31,11 +31,6 @@
           "stopped": "중지됨",
           "exiting": "종료 중",
           "unknown": "알 수 없음"
-        },
-        "button": {
-          "start": "시작",
-          "stop": "중지",
-          "pause": "일시 중지"
         }
       }
     },
@@ -46,17 +41,9 @@
     },
     "settings": {
       "title": "설정",
-      "language": {
-        "title": "언어 변경",
-        "description": "WebUI의 언어를 변경합니다."
-      },
       "fullscreen": {
         "title": "WebUI 전체 화면 모드 비활성화",
         "description": "WebUI가 화면 전체를 채우지 않습니다."
-      },
-      "theme": {
-        "title": "WebUI 테마 변경",
-        "description": "현재 WebUI의 시스템 테마를 선택합니다."
       },
       "font": {
         "title": "시스템 글꼴 활성화",
@@ -66,18 +53,6 @@
       "WebUIDevelopers": "WebUI 개발자",
       "orginalDevelopers": "원작 모듈 개발자",
       "moduleLicense": "모듈 라이선스"
-    },
-    "mini_settings_language": {
-      "title": "언어 변경"
-    },
-    "mini_settings_theme": {
-      "title": "WebUI 테마 변경",
-      "theme": {
-        "dark": "다크 테마",
-        "light": "라이트 테마",
-        "amoled": "AMOLED 테마",
-        "system_based": "시스템 기반 테마"
-      }
     }
   },
   "globals": {

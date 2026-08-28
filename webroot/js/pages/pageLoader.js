@@ -1,84 +1,64 @@
 import { exec, toast } from '../kernelsu.js'
 
 import { loadNavbar, setNavbar, whichCurrentPage } from './navbar.js'
-import { runMainPageTransition, runMiniPageEnter, runMiniPageLeave } from './animator.js'
+import { runMainPageTransition } from './animator.js'
 
 /* INFO: Prototypes */
 import utils from './utils.js'
 
-const moduleName = 'TreatWheel'
 const head = document.getElementsByTagName('head')[0]
-const miniPageRegex = /mini_(.*)_(.*)/
 
-export const allMainPages = [
+export const allPages = [
   'home',
   'modules',
   'actions',
   'settings'
 ]
 
-export const allMiniPages = [
-  'mini_settings_language',
-  'mini_settings_theme'
-]
-
-export const allPages = [ ...allMainPages, ...allMiniPages ]
-
 const loadedPageView = []
 /* INFO: Prevent overlapping page transitions when users tap navigation rapidly. */
 let isPageTransitioning = false
-/* INFO: Direct assignment would link both arrays. We do not want that. */
-const sufferedUpdate = [ ...allPages ]
-const pageReplacements = allPages.reduce((obj, pageId) => {
-  obj[pageId] = []
 
-  return obj
-}, {})
+/* INFO: Translations shipped with the module, without the .json suffix */
+const availableLanguages = [
+  'ar_EG', 'de_DE', 'en_US', 'es_AR', 'id_ID', 'it_IT', 'ja_JP', 'ko_KR',
+  'pl_PL', 'pt_BR', 'ru_RU', 'tr_TR', 'uk_UA', 'vi_VN', 'zh_CN'
+]
 
-async function loadHTML(pageId) {
-  if (miniPageRegex.test(pageId)) {
-    const miniPageIdData = miniPageRegex.exec(pageId)
-    const parentPage = miniPageIdData[1]
-    const miniPage = miniPageIdData[2]
-    return fetch(`js/pages/${parentPage}/minipage/${miniPage}/index.html`)
-      .then((response) => response.text())
-      .then((data) => {
-        return data
-      })
-      .catch(() => false)
-  } else {
-    return fetch(`js/pages/${pageId}/index.html`)
-      .then((response) => response.text())
-      .then((data) => {
-        return data
-      })
-      .catch(() => false)
-  }
+/* INFO: Some languages only ship one regional translation, e.g. pt-PT falls back to pt-BR */
+const languageFallbacks = {
+  ar: 'ar_EG',
+  es: 'es_AR',
+  pt: 'pt_BR'
 }
 
-async function hotReloadStrings(html, pageId) {
-  const strings = await getStrings(pageId)
-  if (!strings) return html
+/* INFO: The WebView reports the device locales, so the language follows the system */
+function detectLanguage() {
+  const locales = [ ...(navigator.languages || []), navigator.language ]
 
-  pageReplacements[pageId].forEach((replacement, i) => {
-    const key = replacement.key.slice(2, -2)
+  for (const locale of locales) {
+    if (typeof locale !== 'string') continue;
 
-    const split = key.split('.')
-    if (split.length === 1) {
-      html = html.replace(replacement.value, strings[key])
-      pageReplacements[pageId][i].value = strings[key]
-    } else {
-      let value = strings
-      split.forEach((key) => {
-        value = value[key]
-      })
+    const normalized = locale.replace('-', '_')
+    if (availableLanguages.includes(normalized)) return normalized
 
-      html = html.replace(replacement.value, value)
-      pageReplacements[pageId][i].value = value
-    }
-  })
+    const primary = normalized.split('_')[0]
+    if (availableLanguages.includes(primary)) return primary
+    if (languageFallbacks[primary]) return languageFallbacks[primary]
+  }
 
-  return html
+  return 'en_US'
+}
+
+export const detectedLanguage = detectLanguage()
+
+async function loadHTML(pageId) {
+  return fetch(`js/pages/${pageId}/index.html`)
+    .then((response) => response.text())
+    .then((data) => {
+      return data
+    })
+    .catch(() => false)
 }
 
 async function solveStrings(html, pageId) {
@@ -95,84 +75,45 @@ async function solveStrings(html, pageId) {
       const key = match.slice(2, -2)
 
       const split = key.split('.')
-      if (split.length === 1) {
-        html = html.replace(match, strings[key])
-        pageReplacements[pageId].push({ key: match, value: strings[key] })
-      } else {
-        let value = strings
-        split.forEach((key) => {
-          value = value[key]
-        })
+      if (split.length === 1) return html = html.replace(match, strings[key]);
 
-        html = html.replace(match, value)
-        pageReplacements[pageId].push({ key: match, value: value })
-      }
+      let value = strings
+      split.forEach((key) => {
+        value = value[key]
+      })
+
+      html = html.replace(match, value)
     })
   } catch (e) {
-    toast(`Failed to load ${localStorage.getItem(`/${moduleName}/language`) || 'en_US'} strings. Entering safe mode.`)
+    toast(`Failed to load ${detectedLanguage} strings. Entering safe mode.`)
   }
 
   /* INFO: Perform navbar string replacement */
-  allMainPages.forEach((page) => document.getElementById(`nav_${page}_title`).innerText = strings.navbar[page])
+  allPages.forEach((page) => document.getElementById(`nav_${page}_title`).innerText = strings.navbar[page])
 
   return html
 }
 
 async function getPageScripts(pageId) {
-  if (miniPageRegex.test(pageId)) {
-    const miniPageIdData = miniPageRegex.exec(pageId)
-    const parentPage = miniPageIdData[1]
-    const miniPage = miniPageIdData[2]
-    return fetch(`js/pages/${parentPage}/minipage/${miniPage}/pageScripts`)
-      .then((response) => response.text())
-      .then((data) => {
-        return data
-      })
-      .catch(() => false)
-  } else {
-    return fetch(`js/pages/${pageId}/pageScripts`)
-      .then((response) => response.text())
-      .then((data) => {
-        return data
-      })
-      .catch(() => false)
-  }
+  return fetch(`js/pages/${pageId}/pageScripts`)
+    .then((response) => response.text())
+    .then((data) => {
+      return data
+    })
+    .catch(() => false)
 }
 
 async function getPageCSS(pageId) {
-  if (miniPageRegex.test(pageId)) {
-    const miniPageIdData = miniPageRegex.exec(pageId)
-    const parentPage = miniPageIdData[1]
-    const miniPage = miniPageIdData[2]
-    return await fetch(`js/pages/${parentPage}/minipage/${miniPage}/index.css`)
-      .then((response) => response.text())
-      .then((data) => {
-        return data
-      })
-      .catch(() => false)
-  } else {
-    return fetch(`js/pages/${pageId}/index.css`)
-      .then((response) => response.text())
-      .then((data) => {
-        return data
-      })
-      .catch(() => false)
-  }
+  return await fetch(`js/pages/${pageId}/index.css`)
+    .then((response) => response.text())
+    .then((data) => {
+      return data
+    })
+    .catch(() => false)
 }
 
 function importPageJS(pageId) {
-  if (miniPageRegex.test(pageId)) {
-    const miniPageIdData = miniPageRegex.exec(pageId)
-    const parentPage = miniPageIdData[1]
-    const miniPage = miniPageIdData[2]
-    return import(`./${parentPage}/minipage/${miniPage}/index.js`)
-  } else {
-    return import(`./${pageId}/index.js`)
-  }
-}
-
-function isMiniPage(pageId) {
-  return miniPageRegex.test(pageId)
+  return import(`./${pageId}/index.js`)
 }
 
 function isHTMLUnused(page, pageId) {
@@ -194,15 +135,6 @@ function isHTMLUnused(page, pageId) {
 
 async function initializePage(pageId, pageSpecificContent, shouldApplyHTMLChanges = true) {
   const module = await importPageJS(pageId)
-
-  if (!sufferedUpdate.includes(pageId)) {
-    pageSpecificContent.innerHTML = await hotReloadStrings(pageSpecificContent.innerHTML, pageId)
-    if (shouldApplyHTMLChanges) applyHTMLChanges(pageSpecificContent, pageId)
-
-    module.onceViewAfterUpdate()
-
-    sufferedUpdate.push(pageId)
-  }
 
   if (!loadedPageView.includes(pageId)) {
     pageSpecificContent.innerHTML = await solveStrings(pageSpecificContent.innerHTML, pageId)
@@ -233,7 +165,7 @@ function unuseHTML(page, pageId, shouldRemoveListeners = true) {
       for (const className of child.classList) {
         if (className.startsWith(pagePrefix)) {
           newClasses.push(className)
-          continue
+          continue;
         }
 
         newClasses.push(`${pagePrefix}${className}`)
@@ -279,7 +211,6 @@ async function loadPages() {
       pageSpecificContent.id = `${page}_content`
       pageSpecificContent.innerHTML = pageHTML
       pageSpecificContent.style.display = 'none'
-      if (isMiniPage(page)) pageSpecificContent.classList.add('page_loader_mini_layer')
 
       pageContent.appendChild(pageSpecificContent)
       unuseHTML(pageSpecificContent, page)
@@ -393,15 +324,12 @@ export async function loadPage(pageId) {
   try {
     setNavbar(pageId)
 
-    const targetIsMiniPage = isMiniPage(pageId)
-    const currentIsMiniPage = currentPage ? isMiniPage(currentPage) : false
-    /* INFO: Main-to-main transitions switch CSS at animation midpoint to avoid style conflicts. */
-    const isMainToMain = currentPage && !currentIsMiniPage && !targetIsMiniPage
     const pageSpecificContent = document.getElementById(`${pageId}_content`)
     const targetNeedsRevert = isHTMLUnused(pageSpecificContent, pageId)
 
     if (targetNeedsRevert) revertHTMLUnuse(pageSpecificContent, pageId)
-    if (!isMainToMain) document.getElementById(`${pageId}_css`).media = 'all'
+
+    document.getElementById(`${pageId}_css`).media = 'all'
 
     if (!currentPage) {
       await initializePage(pageId, pageSpecificContent, targetNeedsRevert)
@@ -411,77 +339,8 @@ export async function loadPage(pageId) {
     }
 
     const currentPageContent = document.getElementById(`${currentPage}_content`)
-    if (!currentIsMiniPage && targetIsMiniPage) {
-      history.pushState(true, '', location.pathname)
+    const transitionDirection = allPages.indexOf(pageId) > allPages.indexOf(currentPage) ? 1 : -1
 
-      if (!loadedPageView.includes(pageId)) {
-        const minipage_header = `
-          <div class="header" style="padding-left: 20px; display: flex; align-items: center; justify-content: initial;">
-            <div id="minipage_close" class="back_icon" style="width: 36px; height: 36px; margin-right: 6px;"></div>
-            <div id="minipage_title">VexZygisk: {{title}}</div>
-          </div>
-        `
-        pageSpecificContent.insertAdjacentHTML('afterbegin', minipage_header)
-      }
-
-      await initializePage(pageId, pageSpecificContent, targetNeedsRevert)
-
-      const minipage_back_icon = pageSpecificContent.querySelector('.back_icon')
-
-      let isClosing = false
-      async function miniPageCloseListener(isClick) {
-        if (isClosing) return true
-        isClosing = true
-
-        if (isClick) history.back()
-
-        const parentPage = miniPageRegex.exec(pageId)[1]
-        setNavbar(parentPage)
-
-        await runMiniPageLeave(pageSpecificContent)
-        unuseHTML(pageSpecificContent, pageId, false)
-        document.getElementById(`${pageId}_css`).media = 'not all'
-
-        return true
-      }
-
-      minipage_back_icon.addEventListener('click', () => miniPageCloseListener(true), { once: true })
-      window.onceTrueEvent('popstate', () => miniPageCloseListener(false))
-
-      await runMiniPageEnter(pageSpecificContent)
-
-      return true
-    }
-
-    if (currentIsMiniPage) {
-      history.back()
-
-      /* INFO: Leaving a mini page always closes its overlay first, then opens the target page. */
-      await runMiniPageLeave(currentPageContent)
-      unuseHTML(currentPageContent, currentPage)
-      document.getElementById(`${currentPage}_css`).media = 'not all'
-
-      const parentPage = miniPageRegex.exec(currentPage)[1]
-      if (parentPage !== pageId && !targetIsMiniPage) {
-        document.getElementById(`${parentPage}_content`).style.display = 'none'
-        unuseHTML(document.getElementById(`${parentPage}_content`), parentPage, false)
-        document.getElementById(`${parentPage}_css`).media = 'not all'
-      }
-
-      await initializePage(pageId, pageSpecificContent, targetNeedsRevert)
-
-      if (targetIsMiniPage) {
-        await runMiniPageEnter(pageSpecificContent)
-      } else {
-        pageSpecificContent.style.display = 'block'
-      }
-
-      return true
-    }
-
-    const transitionDirection = allMainPages.indexOf(pageId) > allMainPages.indexOf(currentPage) ? 1 : -1
-
-    document.getElementById(`${pageId}_css`).media = 'all'
     utils.removeAllListeners()
     await initializePage(pageId, pageSpecificContent, targetNeedsRevert)
 
@@ -507,81 +366,6 @@ export async function loadPage(pageId) {
   }
 }
 
-function getMiniPage(miniPageId) {
-  return fetch(`js/pages/${whichCurrentPage()}/minipages/${miniPageId}.html`)
-    .then((response) => response.text())
-    .then((data) => {
-      return data
-    })
-    .catch(() => false)
-}
-
-export async function loadMiniPage(miniPageId, unloadCb) {
-  const minipage_html = await getMiniPage(miniPageId)
-  if (!minipage_html) {
-    toast('Error loading minipage')
-
-    return;
-  }
-
-  const page_content = document.getElementById('page_content')
-  const navbar = document.getElementById('navbar')
-  const navbar_support_div = document.getElementById('navbar_support_div')
-
-  page_content.style.transition = navbar.style.transition = 'filter 0.3s'
-  page_content.style.filter = navbar.style.filter = 'blur(10px)'
-  /* INFO: Not allow it to interact with the page, just click to close */
-  page_content.style.pointerEvents = navbar_support_div.style.pointerEvents = 'none'
-
-  function cleanup(isClick) {
-    if (utils.isDivOrInsideDiv(event.target, 'minipage_content')) return;
-
-    if (isClick) history.back()
-
-    const minipage_content = document.getElementById('minipage_content')
-    minipage_content.style.animation = 'fade-out 0.2s'
-
-    page_content.style.transition = navbar.style.transition = 'filter 0.2s'
-    page_content.style.filter = navbar.style.filter = null
-    page_content.style.pointerEvents = navbar_support_div.style.pointerEvents = null
-
-    setTimeout(() => {
-      minipage_content.style.cssText = null
-      minipage_content.innerHTML = null
-
-      page_content.style.transition = navbar.style.transition = null
-    }, 200)
-
-    unloadCb()
-
-    return true
-  }
-
-  window.onceTrueEvent('click', (event) => cleanup(true))
-  window.onceTrueEvent('popstate', () => cleanup(false))
-
-  const minipage_content = document.getElementById('minipage_content')
-  minipage_content.style.cssText = `
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1;
-    background: none;
-    animation: fade-in 0.3s;
-  `
-
-  minipage_content.innerHTML = `
-    <div class="dim" style="padding: 20px; border-radius: 10px; width: 80vw;">
-      <div class="dim" style="border-radius: 10px;">
-        ${minipage_html}
-      </div>
-    </div>
-  `
-
-  history.pushState(true, '', location.pathname)
-}
-
 export async function reloadPage() {
   const pageId = whichCurrentPage()
 
@@ -595,8 +379,8 @@ export async function reloadPage() {
   utils.reapplyListeners()
 }
 
-export function getStrings(pageId, forceDefault = false) {
-  return fetch(`lang/${forceDefault ? 'en_US' : (localStorage.getItem(`/${moduleName}/language`) || 'en_US')}.json`)
+async function fetchStrings(pageId, language) {
+  return fetch(`lang/${language}.json`)
     .then((response) => response.json())
     .then((data) => {
       return {
@@ -605,24 +389,26 @@ export function getStrings(pageId, forceDefault = false) {
         navbar: Object.fromEntries(allPages.map((page) => [page, data.pages[page].title]))
       }
     })
-    .catch((err) => {
-      if (!forceDefault) {
-        toast('Error loading strings for the selected language, loading default (en_US) strings.')
-
-        return getStrings(pageId, true)
-      }
-
-      toast('Error loading default strings!')
-      console.error(`Failed to load default strings for page ${pageId}: `, err)
-
-      return false
-    })
 }
 
-export function setLanguage(langId) {
-  localStorage.setItem(`/${moduleName}/language`, langId)
+export function getStrings(pageId) {
+  return fetchStrings(pageId, detectedLanguage)
+    .catch(() => {
+      if (detectedLanguage === 'en_US') {
+        toast('Error loading default strings!')
 
-  sufferedUpdate.length = 0
+        return false
+      }
+
+      toast(`Error loading ${detectedLanguage} strings, loading default (en_US) strings.`)
+
+      return fetchStrings(pageId, 'en_US')
+        .catch(() => {
+          toast('Error loading default strings!')
+
+          return false
+        })
+    })
 }
 
 (async () => {

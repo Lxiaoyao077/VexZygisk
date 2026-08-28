@@ -31,11 +31,6 @@
           "stopped": "已停止",
           "exiting": "正在退出",
           "unknown": "未知"
-        },
-        "button": {
-          "start": "启动",
-          "stop": "停止",
-          "pause": "暂停"
         }
       }
     },
@@ -46,17 +41,9 @@
     },
     "settings": {
       "title": "设置",
-      "language": {
-        "title": "语言",
-        "description": "将 WebUI 的语言切换为所选语言。"
-      },
       "fullscreen": {
         "title": "禁用 WebUI 全屏模式",
         "description": "启用此选项后，WebUI 将不会占满整个屏幕。"
-      },
-      "theme": {
-        "title": "更改 WebUI 主题",
-        "description": "为当前 WebUI 选择系统主题。"
       },
       "font": {
         "title": "启用系统字体",
@@ -66,18 +53,6 @@
       "WebUIDevelopers": "WebUI 开发者",
       "orginalDevelopers": "原始模块开发者",
       "moduleLicense": "模块许可证"
-    },
-    "mini_settings_language": {
-      "title": "语言"
-    },
-    "mini_settings_theme": {
-      "title": "更改 WebUI 主题",
-      "theme": {
-        "dark": "深色主题",
-        "light": "浅色主题",
-        "amoled": "Amoled 主题",
-        "system_based": "跟随系统"
-      }
     }
   },
   "globals": {

@@ -42,7 +42,7 @@ const developmentResponse = {
   },
   'module_lister': {
     errno: 0,
-    stdout: 'Really Cool Module\n\nSome ReZygisk Module',
+    stdout: 'Really Cool Module\n\nSome VexZygisk Module',
     stderr: ''
   },
   '/system/bin/ls /data/adb/modules/rezygisk/webroot/lang': {

@@ -8,11 +8,7 @@
 #include "../constants.h"
 
 enum root_impls {
-  None,
-  Multiple,
-  KernelSU,
-  APatch,
-  Magisk
+  KernelSU
 };
 
 struct root_impl_state {
@@ -25,7 +21,7 @@ struct root_impl {
   uint8_t variant;
 };
 
-#define LONGEST_ROOT_IMPL_NAME sizeof("KernelSU Next")
+#define LONGEST_ROOT_IMPL_NAME sizeof("KernelSU")
 
 void root_impls_setup(void);
 
@@ -33,7 +29,7 @@ void get_impl(struct root_impl *uimpl);
 
 bool uid_granted_root(uid_t uid);
 
-bool uid_should_umount(uid_t uid, const char *const process);
+bool uid_should_umount(uid_t uid);
 
 bool uid_is_manager(uid_t uid);
 

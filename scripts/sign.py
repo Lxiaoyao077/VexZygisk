@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Signing tool for ReZygisk module.
+Signing tool for VexZygisk module.
 
 Implements module signing according to the following scheme:
   - machikado: per-architecture runtime file signatures

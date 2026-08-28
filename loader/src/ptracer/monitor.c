@@ -20,6 +20,25 @@
 
 #define STOPPED_WITH(sig, event) (WIFSTOPPED(sigchld_status) && (sigchld_status >> 8 == ((sig) | ((event) << 8))))
 
+/* INFO: A monitor is built for a single bitness and only ever injects the Zygote
+           sharing it. Modern devices boot a 64-bit primary Zygote and a secondary
+           32-bit one which is barely used anymore; injecting the latter adds nothing
+           but instability and extra ptrace work, hence it is skipped. Devices that
+           are 32-bit only still get full support through the 32-bit monitor. */
+#ifdef __LP64__
+  #define MONITOR_ABI "64"
+  #define APP_PROCESS_NAME "/system/bin/app_process64"
+  #define CMD_ZYGOTE_INJECTED ZYGOTE64_INJECTED
+  #define CMD_DAEMON_SET_INFO DAEMON64_SET_INFO
+  #define CMD_DAEMON_SET_ERROR_INFO DAEMON64_SET_ERROR_INFO
+#else
+  #define MONITOR_ABI "32"
+  #define APP_PROCESS_NAME "/system/bin/app_process32"
+  #define CMD_ZYGOTE_INJECTED ZYGOTE32_INJECTED
+  #define CMD_DAEMON_SET_INFO DAEMON32_SET_INFO
+  #define CMD_DAEMON_SET_ERROR_INFO DAEMON32_SET_ERROR_INFO
+#endif
+
 static bool update_status(const char *message);
 
 const char *monitor_stop_reason = NULL;
@@ -30,8 +49,7 @@ struct environment_information {
   uint32_t modules_len;
 };
 
-static struct environment_information environment_information64;
-static struct environment_information environment_information32;
+static struct environment_information environment_information;
 
 enum ptracer_tracing_state {
   TRACING,
@@ -47,24 +65,14 @@ struct rezygiskd_status {
   bool zygote_injected;
   bool daemon_running;
   pid_t daemon_pid;
-  char *daemon_info;
   char *daemon_error_info;
 };
 
-struct rezygiskd_status status64 = {
+struct rezygiskd_status status = {
   .supported = false,
   .zygote_injected = false,
   .daemon_running = false,
   .daemon_pid = -1,
-  .daemon_info = NULL,
-  .daemon_error_info = NULL
-};
-struct rezygiskd_status status32 = {
-  .supported = false,
-  .zygote_injected = false,
-  .daemon_running = false,
-  .daemon_pid = -1,
-  .daemon_info = NULL,
   .daemon_error_info = NULL
 };
 
@@ -214,121 +222,117 @@ void rezygiskd_listener_callback() {
 
         break;
       }
-      case ZYGOTE64_INJECTED:
-      case ZYGOTE32_INJECTED: {
-        LOGI("Received Zygote%s injected command", cmd == ZYGOTE64_INJECTED ? "64" : "32");
+      case CMD_ZYGOTE_INJECTED: {
+        LOGI("Received Zygote%s injected command", MONITOR_ABI);
 
-        struct rezygiskd_status *status = cmd == ZYGOTE64_INJECTED ? &status64 : &status32;
-        status->zygote_injected = true;
+        status.zygote_injected = true;
 
         update_status(NULL);
 
         break;
       }
-      case DAEMON64_SET_INFO:
-      case DAEMON32_SET_INFO: {
-        LOGD("Received ReZygiskd%s info", cmd == DAEMON64_SET_INFO ? "64" : "32");
+      case CMD_DAEMON_SET_INFO: {
+        LOGD("Received VexZygiskd%s info", MONITOR_ABI);
 
         uint32_t root_impl_len;
         if (read_uint32_t(monitor_sock_fd, &root_impl_len) != sizeof(root_impl_len)) {
-          LOGE("read ReZygiskd%s root impl len", cmd == DAEMON64_SET_INFO ? "64" : "32");
+          LOGE("read VexZygiskd%s root impl len", MONITOR_ABI);
 
           break;
         }
 
-        struct environment_information *environment_information = cmd == DAEMON64_SET_INFO ? &environment_information64 : &environment_information32;
-        if (environment_information->root_impl) {
-          LOGD("freeing old ReZygiskd%s root impl", cmd == DAEMON64_SET_INFO ? "64" : "32");
+        if (environment_information.root_impl) {
+          LOGD("freeing old VexZygiskd%s root impl", MONITOR_ABI);
 
-          free((void *)environment_information->root_impl);
-          environment_information->root_impl = NULL;
+          free((void *)environment_information.root_impl);
+          environment_information.root_impl = NULL;
         }
 
-        environment_information->root_impl = malloc(root_impl_len + 1);
-        if (environment_information->root_impl == NULL) {
-          PLOGE("malloc ReZygiskd%s root impl", cmd == DAEMON64_SET_INFO ? "64" : "32");
+        environment_information.root_impl = malloc(root_impl_len + 1);
+        if (environment_information.root_impl == NULL) {
+          PLOGE("malloc VexZygiskd%s root impl", MONITOR_ABI);
 
           break;
         }
 
-        if (read_loop(monitor_sock_fd, (void *)environment_information->root_impl, root_impl_len) != (ssize_t)root_impl_len) {
-          LOGE("read ReZygiskd%s root impl", cmd == DAEMON64_SET_INFO ? "64" : "32");
+        if (read_loop(monitor_sock_fd, (void *)environment_information.root_impl, root_impl_len) != (ssize_t)root_impl_len) {
+          LOGE("read VexZygiskd%s root impl", MONITOR_ABI);
 
-          free((void *)environment_information->root_impl);
-          environment_information->root_impl = NULL;
-
-          break;
-        }
-
-        environment_information->root_impl[root_impl_len] = '\0';
-        LOGD("ReZygiskd%s root impl: %s", cmd == DAEMON64_SET_INFO ? "64" : "32", environment_information->root_impl);
-
-        if (read_uint32_t(monitor_sock_fd, &environment_information->modules_len) != sizeof(environment_information->modules_len)) {
-          LOGE("read ReZygiskd%s modules len", cmd == DAEMON64_SET_INFO ? "64" : "32");
-
-          free((void *)environment_information->root_impl);
-          environment_information->root_impl = NULL;
+          free((void *)environment_information.root_impl);
+          environment_information.root_impl = NULL;
 
           break;
         }
 
-        if (environment_information->modules) {
-          LOGD("freeing old ReZygiskd%s modules", cmd == DAEMON64_SET_INFO ? "64" : "32");
+        environment_information.root_impl[root_impl_len] = '\0';
+        LOGD("VexZygiskd%s root impl: %s", MONITOR_ABI, environment_information.root_impl);
 
-          for (size_t i = 0; i < environment_information->modules_len; i++) {
-            free((void *)environment_information->modules[i]);
+        if (read_uint32_t(monitor_sock_fd, &environment_information.modules_len) != sizeof(environment_information.modules_len)) {
+          LOGE("read VexZygiskd%s modules len", MONITOR_ABI);
+
+          free((void *)environment_information.root_impl);
+          environment_information.root_impl = NULL;
+
+          break;
+        }
+
+        if (environment_information.modules) {
+          LOGD("freeing old VexZygiskd%s modules", MONITOR_ABI);
+
+          for (size_t i = 0; i < environment_information.modules_len; i++) {
+            free((void *)environment_information.modules[i]);
           }
 
-          free((void *)environment_information->modules);
-          environment_information->modules = NULL;
+          free((void *)environment_information.modules);
+          environment_information.modules = NULL;
         }
 
-        environment_information->modules = malloc(environment_information->modules_len * sizeof(char *));
-        if (environment_information->modules == NULL) {
-          PLOGE("malloc ReZygiskd%s modules", cmd == DAEMON64_SET_INFO ? "64" : "32");
+        environment_information.modules = malloc(environment_information.modules_len * sizeof(char *));
+        if (environment_information.modules == NULL) {
+          PLOGE("malloc VexZygiskd%s modules", MONITOR_ABI);
 
-          free((void *)environment_information->root_impl);
-          environment_information->root_impl = NULL;
+          free((void *)environment_information.root_impl);
+          environment_information.root_impl = NULL;
 
           break;
         }
 
-        for (size_t i = 0; i < environment_information->modules_len; i++) {
+        for (size_t i = 0; i < environment_information.modules_len; i++) {
           uint32_t module_name_len;
           if (read_uint32_t(monitor_sock_fd, &module_name_len) != sizeof(module_name_len)) {
-            LOGE("read ReZygiskd%s module name len", cmd == DAEMON64_SET_INFO ? "64" : "32");
+            LOGE("read VexZygiskd%s module name len", MONITOR_ABI);
 
             goto set_info_modules_cleanup;
           }
 
-          environment_information->modules[i] = malloc(module_name_len + 1);
-          if (environment_information->modules[i] == NULL) {
-            PLOGE("malloc ReZygiskd%s module name", cmd == DAEMON64_SET_INFO ? "64" : "32");
+          environment_information.modules[i] = malloc(module_name_len + 1);
+          if (environment_information.modules[i] == NULL) {
+            PLOGE("malloc VexZygiskd%s module name", MONITOR_ABI);
 
             goto set_info_modules_cleanup;
           }
 
-          if (read_loop(monitor_sock_fd, (void *)environment_information->modules[i], module_name_len) != (ssize_t)module_name_len) {
-            LOGE("read ReZygiskd%s module name", cmd == DAEMON64_SET_INFO ? "64" : "32");
+          if (read_loop(monitor_sock_fd, (void *)environment_information.modules[i], module_name_len) != (ssize_t)module_name_len) {
+            LOGE("read VexZygiskd%s module name", MONITOR_ABI);
 
             goto set_info_modules_cleanup;
           }
 
-          environment_information->modules[i][module_name_len] = '\0';
-          LOGD("ReZygiskd%s module %zu: %s", cmd == DAEMON64_SET_INFO ? "64" : "32", i, environment_information->modules[i]);
+          environment_information.modules[i][module_name_len] = '\0';
+          LOGD("VexZygiskd%s module %zu: %s", MONITOR_ABI, i, environment_information.modules[i]);
 
           continue;
 
           set_info_modules_cleanup:
-            free((void *)environment_information->root_impl);
-            environment_information->root_impl = NULL;
+            free((void *)environment_information.root_impl);
+            environment_information.root_impl = NULL;
 
             for (size_t j = 0; j < i; j++) {
-              free((void *)environment_information->modules[j]);
+              free((void *)environment_information.modules[j]);
             }
 
-            free((void *)environment_information->modules);
-            environment_information->modules = NULL;
+            free((void *)environment_information.modules);
+            environment_information.modules = NULL;
 
             break;
         }
@@ -337,43 +341,41 @@ void rezygiskd_listener_callback() {
 
         break;
       }
-      case DAEMON64_SET_ERROR_INFO:
-      case DAEMON32_SET_ERROR_INFO: {
-        LOGD("Received ReZygiskd%s error info", cmd == DAEMON64_SET_ERROR_INFO ? "64" : "32");
+      case CMD_DAEMON_SET_ERROR_INFO: {
+        LOGD("Received VexZygiskd%s error info", MONITOR_ABI);
 
         uint32_t error_info_len;
         if (read_uint32_t(monitor_sock_fd, &error_info_len) != sizeof(error_info_len)) {
-          LOGE("read ReZygiskd%s error info len", cmd == DAEMON64_SET_ERROR_INFO ? "64" : "32");
+          LOGE("read VexZygiskd%s error info len", MONITOR_ABI);
 
           break;
         }
 
-        struct rezygiskd_status *status = cmd == DAEMON64_SET_ERROR_INFO ? &status64 : &status32;
-        if (status->daemon_error_info) {
-          LOGD("freeing old ReZygiskd%s error info", cmd == DAEMON64_SET_ERROR_INFO ? "64" : "32");
+        if (status.daemon_error_info) {
+          LOGD("freeing old VexZygiskd%s error info", MONITOR_ABI);
 
-          free(status->daemon_error_info);
-          status->daemon_error_info = NULL;
+          free(status.daemon_error_info);
+          status.daemon_error_info = NULL;
         }
 
-        status->daemon_error_info = malloc(error_info_len + 1);
-        if (status->daemon_error_info == NULL) {
-          PLOGE("malloc ReZygiskd%s error info", cmd == DAEMON64_SET_ERROR_INFO ? "64" : "32");
+        status.daemon_error_info = malloc(error_info_len + 1);
+        if (status.daemon_error_info == NULL) {
+          PLOGE("malloc VexZygiskd%s error info", MONITOR_ABI);
 
           break;
         }
 
-        if (read_loop(monitor_sock_fd, status->daemon_error_info, error_info_len) != (ssize_t)error_info_len) {
-          LOGE("read ReZygiskd%s error info", cmd == DAEMON64_SET_ERROR_INFO ? "64" : "32");
+        if (read_loop(monitor_sock_fd, status.daemon_error_info, error_info_len) != (ssize_t)error_info_len) {
+          LOGE("read VexZygiskd%s error info", MONITOR_ABI);
 
-          free(status->daemon_error_info);
-          status->daemon_error_info = NULL;
+          free(status.daemon_error_info);
+          status.daemon_error_info = NULL;
 
           break;
         }
 
-        status->daemon_error_info[error_info_len] = '\0';
-        LOGD("ReZygiskd%s error info: %s", cmd == DAEMON64_SET_ERROR_INFO ? "64" : "32", status->daemon_error_info);
+        status.daemon_error_info[error_info_len] = '\0';
+        LOGD("VexZygiskd%s error info: %s", MONITOR_ABI, status.daemon_error_info);
 
         update_status(NULL);
 
@@ -390,137 +392,60 @@ void rezygiskd_listener_stop() {
 
 #define MAX_RETRY_COUNT 5
 
-#define CREATE_ZYGOTE_START_COUNTER(abi)             \
-  struct timespec last_zygote##abi = {               \
-    .tv_sec = 0,                                     \
-    .tv_nsec = 0                                     \
-  };                                                 \
-                                                     \
-  int count_zygote ## abi = 0;                       \
-  bool should_stop_inject ## abi() {                 \
-    struct timespec now = {};                        \
-    clock_gettime(CLOCK_MONOTONIC, &now);            \
-    if (now.tv_sec - last_zygote ## abi.tv_sec < 30) \
-      count_zygote ## abi++;                         \
-    else                                             \
-      count_zygote ## abi = 0;                       \
-                                                     \
-    last_zygote##abi = now;                          \
-                                                     \
-    return count_zygote##abi >= MAX_RETRY_COUNT;     \
-  }
+struct timespec last_zygote = {
+  .tv_sec = 0,
+  .tv_nsec = 0
+};
 
-CREATE_ZYGOTE_START_COUNTER(64)
-CREATE_ZYGOTE_START_COUNTER(32)
+int count_zygote = 0;
+static bool should_stop_inject() {
+  struct timespec now = {};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  if (now.tv_sec - last_zygote.tv_sec < 30)
+    count_zygote++;
+  else
+    count_zygote = 0;
 
-static bool ensure_daemon_created(bool is_64bit) {
-  struct rezygiskd_status *status = is_64bit ? &status64 : &status32;
-  if (status->daemon_pid != -1) {
-    LOGI("ReZygiskd%s already running", is_64bit ? "64" : "32");
+  last_zygote = now;
 
-    return status->daemon_running;
+  return count_zygote >= MAX_RETRY_COUNT;
+}
+
+static bool ensure_daemon_created() {
+  if (status.daemon_pid != -1) {
+    LOGI("VexZygiskd%s already running", MONITOR_ABI);
+
+    return status.daemon_running;
   }
 
   pid_t pid = fork();
   if (pid < 0) {
-    PLOGE("create ReZygiskd%s", is_64bit ? "64" : "32");
+    PLOGE("create VexZygiskd%s", MONITOR_ABI);
 
     return false;
   }
 
   if (pid == 0) {
     char daemon_name[PATH_MAX] = "./bin/zygiskd";
-    strcat(daemon_name, is_64bit ? "64" : "32");
+    strcat(daemon_name, MONITOR_ABI);
 
     execl(daemon_name, daemon_name, NULL);
 
-    PLOGE("exec ReZygiskd%s failed", is_64bit ? "64" : "32");
+    PLOGE("exec VexZygiskd%s failed", MONITOR_ABI);
 
     exit(1);
   }
 
-  status->supported = true;
-  status->daemon_pid = pid;
-  status->daemon_running = true;
+  status.supported = true;
+  status.daemon_pid = pid;
+  status.daemon_running = true;
 
   return true;
 }
 
-#define CHECK_DAEMON_EXIT(abi)                                    \
-  if (status##abi.supported && pid == status##abi.daemon_pid) {   \
-    char status_str[64];                                          \
-    parse_status(sigchld_status, status_str, sizeof(status_str)); \
-                                                                  \
-    LOGW("daemon" #abi " pid %d exited: %s", pid, status_str);    \
-    status##abi.daemon_running = false;                           \
-                                                                  \
-    if (!status##abi.daemon_error_info) {                         \
-      status##abi.daemon_error_info = strdup(status_str);         \
-      if (!status##abi.daemon_error_info) {                       \
-        LOGE("malloc daemon" #abi " error info failed");          \
-                                                                  \
-        return;                                                   \
-      }                                                           \
-    }                                                             \
-                                                                  \
-    continue;                                                     \
-  }
-
 #define APP_PROCESS "/system/bin/app_process"
 #define APP_PROCESS_64 APP_PROCESS "64"
 #define APP_PROCESS_32 APP_PROCESS "32"
-
-#define PRE_INJECT(abi, is_64)                                        \
-  if (strcmp(program, APP_PROCESS_ ## abi) == 0) {                    \
-    tracer = "./bin/zygisk-ptrace" # abi;                             \
-    is_tango = false;                                                 \
-                                                                      \
-    if (should_stop_inject ## abi()) {                                \
-      LOGW("Zygote" # abi " restart too much times, stop injecting"); \
-                                                                      \
-      tracing_state = STOPPING;                                       \
-      monitor_stop_reason = "Zygote crashed";                         \
-      ptrace(PTRACE_INTERRUPT, 1, 0, 0);                              \
-                                                                      \
-      break;                                                          \
-    }                                                                 \
-                                                                      \
-    if (!ensure_daemon_created(is_64)) {                              \
-      LOGW("ReZygiskd " #abi "-bit not running, stop injecting");     \
-                                                                      \
-      tracing_state = STOPPING;                                       \
-      monitor_stop_reason = "ReZygiskd not running";                  \
-      ptrace(PTRACE_INTERRUPT, 1, 0, 0);                              \
-                                                                      \
-      break;                                                          \
-    }                                                                 \
-  }
-
-#define PRE_INJECT_TANGO                                           \
-  if (strcmp(program, "/system_ext/bin/tango_translator") == 0) {  \
-    tracer = "./bin/zygisk-ptrace32";                              \
-    is_tango = true;                                               \
-                                                                   \
-    if (should_stop_inject32()) {                                  \
-      LOGW("Tango restart too many times, stop injecting");        \
-                                                                   \
-      tracing_state = STOPPING;                                    \
-      monitor_stop_reason = "Zygote crashed";                      \
-      ptrace(PTRACE_INTERRUPT, 1, 0, 0);                           \
-                                                                   \
-      break;                                                       \
-    }                                                              \
-                                                                   \
-    if (!ensure_daemon_created(false)) {                           \
-      LOGW("ReZygiskd 32-bit not running, stop injecting");        \
-                                                                   \
-      tracing_state = STOPPING;                                    \
-      monitor_stop_reason = "ReZygiskd not running";               \
-      ptrace(PTRACE_INTERRUPT, 1, 0, 0);                           \
-                                                                   \
-      break;                                                       \
-    }                                                              \
-  }
 
 int sigchld_signal_fd;
 struct signalfd_siginfo sigchld_fdsi;
@@ -531,7 +456,7 @@ size_t sigchld_process_count = 0;
 
 static bool claim_init_tracer() {
   if (ptrace(PTRACE_SEIZE, 1, 0, PTRACE_O_TRACEFORK) == -1) {
-    /* INFO: In cases where, for example, 2 ReZygisks were executed, the second
+    /* INFO: In cases where, for example, 2 VexZygisks were executed, the second
                process won't be able to seize init due to limitations of ptrace.
                In this case, we should just exit the second process to avoid
                conflicts. */
@@ -638,8 +563,24 @@ void sigchld_listener_callback() {
         continue;
       }
 
-      CHECK_DAEMON_EXIT(64)
-      CHECK_DAEMON_EXIT(32)
+      if (status.supported && pid == status.daemon_pid) {
+        char status_str[64];
+        parse_status(sigchld_status, status_str, sizeof(status_str));
+
+        LOGW("daemon%s pid %d exited: %s", MONITOR_ABI, pid, status_str);
+        status.daemon_running = false;
+
+        if (!status.daemon_error_info) {
+          status.daemon_error_info = strdup(status_str);
+          if (!status.daemon_error_info) {
+            LOGE("malloc daemon%s error info failed", MONITOR_ABI);
+
+            return;
+          }
+        }
+
+        continue;
+      }
 
       pid_t state = 0;
       for (size_t i = 0; i < sigchld_process_count; i++) {
@@ -699,9 +640,60 @@ void sigchld_listener_callback() {
               break;
             }
 
-            PRE_INJECT(64, true)
-            PRE_INJECT(32, false)
-            PRE_INJECT_TANGO
+            if (strcmp(program, APP_PROCESS_NAME) == 0) {
+              tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
+              is_tango = false;
+
+              if (should_stop_inject()) {
+                LOGW("Zygote%s restart too much times, stop injecting", MONITOR_ABI);
+
+                tracing_state = STOPPING;
+                monitor_stop_reason = "Zygote crashed";
+                ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+
+                break;
+              }
+
+              if (!ensure_daemon_created()) {
+                LOGW("VexZygiskd%s not running, stop injecting", MONITOR_ABI);
+
+                tracing_state = STOPPING;
+                monitor_stop_reason = "VexZygiskd not running";
+                ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+
+                break;
+              }
+            }
+#ifdef __LP64__
+            else if (strcmp(program, APP_PROCESS_32) == 0) {
+              LOGD("Skipping 32-bit Zygote %d", pid);
+            }
+#else
+            else if (strcmp(program, "/system_ext/bin/tango_translator") == 0) {
+              tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
+              is_tango = true;
+
+              if (should_stop_inject()) {
+                LOGW("Tango restart too many times, stop injecting");
+
+                tracing_state = STOPPING;
+                monitor_stop_reason = "Zygote crashed";
+                ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+
+                break;
+              }
+
+              if (!ensure_daemon_created()) {
+                LOGW("VexZygiskd%s not running, stop injecting", MONITOR_ABI);
+
+                tracing_state = STOPPING;
+                monitor_stop_reason = "VexZygiskd not running";
+                ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+
+                break;
+              }
+            }
+#endif
 
             if (tracer != NULL) {
               LOGD("Stopping %d (program: %s, tracer: %s, tango: %s)", pid, program, tracer, is_tango ? "yes" : "no");
@@ -730,7 +722,7 @@ void sigchld_listener_callback() {
                   LOGI("exec tracer command: %s trace %s --restart%s", tracer, pid_str, is_tango ? " --tango" : "");
 
                   /* INFO: Only restart companions if it's not the first time */
-                  if ((strcmp(program, APP_PROCESS_64) == 0 && count_zygote64 > 1) || ((strcmp(program, APP_PROCESS_32) == 0 || is_tango) && count_zygote32 > 1)) {
+                  if (count_zygote > 1) {
                     if (is_tango) {
                       execl(tracer, basename(tracer), "trace", pid_str, "--restart", "--tango", NULL);
                     } else {
@@ -793,26 +785,6 @@ void sigchld_listener_stop() {
 static char pre_section[1024];
 static char post_section[1024];
 
-#define WRITE_STATUS_ABI(suffix)                                                     \
-  if (status ## suffix.supported) {                                                  \
-    strcat(status_text, ", ReZygisk " # suffix "-bit: ");                            \
-                                                                                     \
-    if (tracing_state != TRACING) strcat(status_text, "❌");                         \
-    else if (status ## suffix.zygote_injected && status ## suffix.daemon_running)    \
-      strcat(status_text, "✅");                                                     \
-    else strcat(status_text, "⚠️");                                                  \
-                                                                                     \
-    if (!status ## suffix.daemon_running) {                                          \
-      if (status ## suffix.daemon_error_info) {                                      \
-        strcat(status_text, "(ReZygiskd: ");                                         \
-        strcat(status_text, status ## suffix.daemon_error_info);                     \
-        strcat(status_text, ")");                                                    \
-      } else {                                                                       \
-        strcat(status_text, "(ReZygiskd: not running)");                             \
-      }                                                                              \
-    }                                                                                \
-  }
-
 static bool update_status(const char *message) {
   FILE *prop = fopen("/data/adb/modules/rezygisk/module.prop", "w");
   if (prop == NULL) {
@@ -848,13 +820,30 @@ static bool update_status(const char *message) {
     }
   }
 
-  WRITE_STATUS_ABI(64)
-  WRITE_STATUS_ABI(32)
+  if (status.supported) {
+    strcat(status_text, ", VexZygisk ");
+    strcat(status_text, MONITOR_ABI);
+    strcat(status_text, "-bit: ");
+
+    if (tracing_state != TRACING) strcat(status_text, "❌");
+    else if (status.zygote_injected && status.daemon_running) strcat(status_text, "✅");
+    else strcat(status_text, "⚠️");
+
+    if (!status.daemon_running) {
+      if (status.daemon_error_info) {
+        strcat(status_text, "(VexZygiskd: ");
+        strcat(status_text, status.daemon_error_info);
+        strcat(status_text, ")");
+      } else {
+        strcat(status_text, "(VexZygiskd: not running)");
+      }
+    }
+  }
 
   fprintf(prop, "%s[%s] %s", pre_section, status_text, post_section);
   fclose(prop);
 
-  if (environment_information64.root_impl || environment_information32.root_impl) {
+  if (environment_information.root_impl) {
     FILE *json = fopen("/data/adb/rezygisk/state.json", "w");
     if (json == NULL) {
       PLOGE("failed to open state.json");
@@ -863,64 +852,34 @@ static bool update_status(const char *message) {
     }
 
     fprintf(json, "{\n");
-    fprintf(json, "  \"root\": \"%s\",\n", environment_information64.root_impl ? environment_information64.root_impl : environment_information32.root_impl);
+    fprintf(json, "  \"root\": \"%s\",\n", environment_information.root_impl);
 
     fprintf(json, "  \"monitor\": {\n");
     fprintf(json, "    \"state\": \"%d\"", tracing_state);
     if (monitor_stop_reason) fprintf(json, ",\n    \"reason\": \"%s\",\n", monitor_stop_reason);
     else fprintf(json, "\n");
 
-    if (status64.supported || status32.supported)
-      fprintf(json, "  },\n");
-    else
-      fprintf(json, "  }\n");
+    if (status.supported) fprintf(json, "  },\n");
+    else fprintf(json, "  }\n");
 
-
-    if (status64.supported || status32.supported) {
+    if (status.supported) {
       fprintf(json, "  \"rezygiskd\": {\n");
-      if (status64.supported) {
-        fprintf(json, "    \"64\": {\n");
-        fprintf(json, "      \"state\": %d,\n", status64.daemon_running);
-        if (status64.daemon_error_info) fprintf(json, "      \"reason\": \"%s\",\n", status64.daemon_error_info);
-        fprintf(json, "      \"modules\": [");
+      fprintf(json, "    \"%s\": {\n", MONITOR_ABI);
+      fprintf(json, "      \"state\": %d,\n", status.daemon_running);
+      if (status.daemon_error_info) fprintf(json, "      \"reason\": \"%s\",\n", status.daemon_error_info);
+      fprintf(json, "      \"modules\": [");
 
-        if (environment_information64.modules) for (uint32_t i = 0; i < environment_information64.modules_len; i++) {
-          if (i > 0) fprintf(json, ", ");
-          fprintf(json, "\"%s\"", environment_information64.modules[i]);
-        }
-
-        fprintf(json, "]\n");
-        fprintf(json, "    }");
-        if (status32.supported) fprintf(json, ",\n");
-        else fprintf(json, "\n");
+      if (environment_information.modules) for (uint32_t i = 0; i < environment_information.modules_len; i++) {
+        if (i > 0) fprintf(json, ", ");
+        fprintf(json, "\"%s\"", environment_information.modules[i]);
       }
 
-      if (status32.supported) {
-        fprintf(json, "    \"32\": {\n");
-        fprintf(json, "      \"state\": %d,\n", status32.daemon_running);
-        if (status32.daemon_error_info) fprintf(json, "      \"reason\": \"%s\",\n", status32.daemon_error_info);
-        fprintf(json, "      \"modules\": [");
-
-        if (environment_information32.modules) for (uint32_t i = 0; i < environment_information32.modules_len; i++) {
-          if (i > 0) fprintf(json, ", ");
-          fprintf(json, "\"%s\"", environment_information32.modules[i]);
-        }
-
-        fprintf(json, "]\n");
-        fprintf(json, "    }\n");
-      }
-
+      fprintf(json, "]\n");
+      fprintf(json, "    }\n");
       fprintf(json, "  },\n");
 
       fprintf(json, "  \"zygote\": {\n");
-      if (status64.supported) {
-        fprintf(json, "    \"64\": %d", status64.zygote_injected);
-        if (status32.supported && status32.zygote_injected) fprintf(json, ",\n");
-        else fprintf(json, "\n");
-      }
-      if (status32.supported && status32.zygote_injected) {
-        fprintf(json, "    \"32\": %d\n", status32.zygote_injected);
-      }
+      fprintf(json, "    \"%s\": %d\n", MONITOR_ABI, status.zygote_injected);
       fprintf(json, "  }\n");
     }
 
@@ -968,7 +927,7 @@ static bool prepare_environment() {
 }
 
 void init_monitor() {
-  LOGI("ReZygisk %s", ZKSU_VERSION);
+  LOGI("VexZygisk %s", ZKSU_VERSION);
 
   if (!prepare_environment()) exit(1);
 
@@ -1004,28 +963,17 @@ void init_monitor() {
   rezygiskd_listener_stop();
   sigchld_listener_stop();
 
-  if (status64.daemon_info) free(status64.daemon_info);
-  if (status64.daemon_error_info) free(status64.daemon_error_info);
-  if (status32.daemon_info) free(status32.daemon_info);
-  if (status32.daemon_error_info) free(status32.daemon_error_info);
+  if (status.daemon_error_info) free(status.daemon_error_info);
 
-  if (environment_information64.root_impl) free((void *)environment_information64.root_impl);
-  if (environment_information64.modules) {
-    for (uint32_t i = 0; i < environment_information64.modules_len; i++) {
-      free((void *)environment_information64.modules[i]);
+  if (environment_information.root_impl) free((void *)environment_information.root_impl);
+  if (environment_information.modules) {
+    for (uint32_t i = 0; i < environment_information.modules_len; i++) {
+      free((void *)environment_information.modules[i]);
     }
-    free((void *)environment_information64.modules);
+    free((void *)environment_information.modules);
   }
 
-  if (environment_information32.root_impl) free((void *)environment_information32.root_impl);
-  if (environment_information32.modules) {
-    for (uint32_t i = 0; i < environment_information32.modules_len; i++) {
-      free((void *)environment_information32.modules[i]);
-    }
-    free((void *)environment_information32.modules);
-  }
-
-  LOGI("Terminating ReZygisk monitor");
+  LOGI("Terminating VexZygisk monitor");
 }
 
 int send_control_command(enum rezygiskd_command cmd) {

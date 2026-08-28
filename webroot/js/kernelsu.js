@@ -8,7 +8,7 @@ function getUniqueCallbackName(prefix) {
 
 export function exec(command, options) {
   if (typeof ksu === "undefined") {
-    /* INFO: Assume this is a computer for ReZygisk testing */
+    /* INFO: Assume this is a computer for VexZygisk testing */
 
     return getDevelopmentExecResponse(command);
   }
@@ -78,7 +78,7 @@ ChildProcess.prototype.emit = function (event, ...args) {
 };
 
 export function spawn(command, args, options) {
-  /* INFO: Assume this is a computer for ReZygisk testing */
+  /* INFO: Assume this is a computer for VexZygisk testing */
   if (typeof ksu === "undefined") return new ChildProcess();
 
   if (typeof args === "undefined") {
@@ -119,14 +119,14 @@ export function spawn(command, args, options) {
 }
 
 export function fullScreen(isFullScreen) {
-  /* INFO: Assume this is a computer for ReZygisk testing */
+  /* INFO: Assume this is a computer for VexZygisk testing */
   if (typeof ksu === "undefined") return;
 
   ksu.fullScreen(isFullScreen);
 }
 
 export function toast(message) {
-  /* INFO: Assume this is a computer for ReZygisk testing */
+  /* INFO: Assume this is a computer for VexZygisk testing */
   if (typeof ksu === "undefined") alert(message);
   else ksu.toast(message);
 }

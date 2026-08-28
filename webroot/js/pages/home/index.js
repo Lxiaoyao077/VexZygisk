@@ -8,17 +8,17 @@ let rzState = {
   expectedWorking: 0
 }
 
-async function _getReZygiskState() {
+async function _getVexZygiskState() {
   let stateCmd = await exec('/system/bin/cat /data/adb/rezygisk/state.json')
   if (stateCmd.errno !== 0) {
-    toast('Error getting state of ReZygisk!')
+    toast('Error getting state of VexZygisk!')
 
     return;
   }
 
   try {
-    const ReZygiskState = JSON.parse(stateCmd.stdout)
-    return ReZygiskState
+    const VexZygiskState = JSON.parse(stateCmd.stdout)
+    return VexZygiskState
   } catch {
     return null;
   }
@@ -27,7 +27,7 @@ async function _getReZygiskState() {
 async function _getVersion() {
   let moduleProp = await exec('cat /data/adb/modules/rezygisk/module.prop')
   if (moduleProp.errno !== 0) {
-    toast('Error getting state of ReZygisk!')
+    toast('Error getting state of VexZygisk!')
 
     return;
   }
@@ -68,7 +68,7 @@ async function _getAndroidVersion() {
   }
 }
 
-async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
+async function _updateDynamicElement(firstRun, VexZygiskState, strings) {
   const rootCss = document.querySelector(':root')
   const rz_state = document.getElementById('rz_state')
   const rz_icon_state = document.getElementById('rz_icon_state')
@@ -88,7 +88,7 @@ async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
     zygote_div.style.display = 'none'
   })
 
-  if (ReZygiskState == null) {
+  if (VexZygiskState == null) {
     rz_state.innerHTML = strings.unknown
     rz_icon_state.innerHTML = '<img class="brightc" src="assets/mark.svg">'
     document.getElementById('zygote_class').style.display = 'none'
@@ -98,11 +98,11 @@ async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
   }
 
   if (firstRun) {
-    rzState.expectedWorking = ReZygiskState.zygote === undefined ? 0 : (ReZygiskState.zygote['64'] !== undefined ? 1 : 0) + (ReZygiskState.zygote['32'] !== undefined ? 1 : 0)
+    rzState.expectedWorking = VexZygiskState.zygote === undefined ? 0 : (VexZygiskState.zygote['64'] !== undefined ? 1 : 0) + (VexZygiskState.zygote['32'] !== undefined ? 1 : 0)
   }
 
-  if (ReZygiskState.zygote['64'] && ReZygiskState.zygote !== undefined) {
-    const zygote64 = ReZygiskState.zygote['64']
+  if (VexZygiskState.zygote !== undefined && VexZygiskState.zygote['64'] !== undefined) {
+    const zygote64 = VexZygiskState.zygote['64']
 
     zygote_divs[0].style.display = 'block'
 
@@ -119,8 +119,8 @@ async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
     }
   }
 
-  if (ReZygiskState.zygote && ReZygiskState.zygote['32'] !== undefined) {
-    const zygote32 = ReZygiskState.zygote['32']
+  if (VexZygiskState.zygote && VexZygiskState.zygote['32'] !== undefined) {
+    const zygote32 = VexZygiskState.zygote['32']
 
     zygote_divs[1].style.display = 'block'
 
@@ -152,7 +152,7 @@ async function _updateDynamicElement(firstRun, ReZygiskState, strings) {
     rz_icon_state.innerHTML = '<img class="brightc" src="assets/warn.svg">'
   }
 
-  if (ReZygiskState.zygote === undefined) {
+  if (VexZygiskState.zygote === undefined) {
     document.getElementById('zygote_class').style.display = 'none'
   }
 }
@@ -167,25 +167,25 @@ export async function loadOnceView() {
   document.getElementById('kernel_version_div').innerHTML = await _getKernelString()
   document.getElementById('android_version_div').innerHTML = await _getAndroidVersion()
 
-  const ReZygiskState = await _getReZygiskState()
+  const VexZygiskState = await _getVexZygiskState()
   const strings = await getStrings(whichCurrentPage())
 
-  let root_impl = ReZygiskState ? ReZygiskState.root : null
+  let root_impl = VexZygiskState ? VexZygiskState.root : null
   if (!root_impl) root_impl = strings.unknown
   if (root_impl === 'Multiple') root_impl = strings.rootImpls.multiple
 
   document.getElementById('root_impl').innerHTML = root_impl
 
-  _updateDynamicElement(true, ReZygiskState, strings)
+  _updateDynamicElement(true, VexZygiskState, strings)
 
   /* INFO: This hides the throbber screen */
   loading_screen.style.display = 'none'
 }
 
 export async function onceViewAfterUpdate() {
-  const ReZygiskState = await _getReZygiskState()
+  const VexZygiskState = await _getVexZygiskState()
   const strings = await getStrings(whichCurrentPage())
-  _updateDynamicElement(false, ReZygiskState, strings)
+  _updateDynamicElement(false, VexZygiskState, strings)
 }
 
 export async function load() {

@@ -56,7 +56,7 @@ static int rezygiskd_connect(uint8_t retry) {
 /* TODO: We should unify all of those */
 #define safe_write(fn, name, ret_type)             \
   if (fn == -1) {                                  \
-    LOGE("Failed to write " name " to ReZygiskd"); \
+    LOGE("Failed to write " name " to VexZygiskd"); \
                                                    \
     close(fd);                                     \
                                                    \
@@ -65,7 +65,7 @@ static int rezygiskd_connect(uint8_t retry) {
 
 #define safe_read(fn, name, ret_type)               \
   if (fn == -1) {                                   \
-    LOGE("Failed to read " name " from ReZygiskd"); \
+    LOGE("Failed to read " name " from VexZygiskd"); \
                                                     \
     close(fd);                                      \
                                                     \
@@ -114,10 +114,7 @@ void rezygiskd_get_info(struct rezygisk_info *info) {
   uint32_t flags = 0;
   safe_read(read_uint32_t(fd, &flags), "info flags", return);
 
-  if (flags & (1 << 28)) info->root_impl = ROOT_IMPL_APATCH;
-  else if (flags & (1 << 29)) info->root_impl = ROOT_IMPL_KERNELSU;
-  else if (flags & (1 << 30)) info->root_impl = ROOT_IMPL_MAGISK;
-  else info->root_impl = ROOT_IMPL_NONE;
+  info->root_impl = ROOT_IMPL_KERNELSU;
 
   safe_read(read_uint32_t(fd, (uint32_t *)&info->pid), "pid", return);
 

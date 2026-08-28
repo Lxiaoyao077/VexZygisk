@@ -8,7 +8,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: "The ReZygisk version you are suffering the bug with. It MUST be a \"-debug\" version. You must follow the same format as in the \"module.prop\" file, inside the ReZygisk zip file."
+      description: "The VexZygisk version you are suffering the bug with. It MUST be a \"-debug\" version. You must follow the same format as in the \"module.prop\" file, inside the VexZygisk zip file."
       placeholder: "e.g. v1.2.3 (000-abcd1234-debug)"
     validations:
       required: true
@@ -17,7 +17,7 @@ body:
     id: reproducible_since
     attributes:
       label: Reproducible since version
-      description: "The ReZygisk version since when the bug is reproducible. Following the same requires and retrieval as the field above. However, you will have to flash older CI versions of ReZygisk to fill this field."
+      description: "The VexZygisk version since when the bug is reproducible. Following the same requires and retrieval as the field above. However, you will have to flash older CI versions of VexZygisk to fill this field."
       placeholder: "e.g. v1.2.0 (000-wxyz5678-debug)"
     validations:
       required: true
@@ -47,7 +47,7 @@ body:
       description: "ALL modules that are installed in the affected device. Provide status (enabled or disabled), name, creator, version, and link to its repository or website. You must follow the EXACT format of the placeholder below. The modules must be separated by status, the enabled ones first, and then the disabled ones, if any."
       placeholder: |
         e.g.
-        Enabled. ReZygisk by The PerformanC Organization, version 1.2.3, available at https://github.com/PerformanC/ReZygisk
+        Enabled. VexZygisk by The PerformanC Organization, version 1.2.3, available at https://github.com/PerformanC/VexZygisk
         Disabled. ReLSPosed by ThePedroo, version 3.2.1, available at https://github.com/ThePedroo/ReLSPosed
         ...
     validations:
@@ -58,7 +58,7 @@ body:
     attributes:
       label: Description
       description: "A clear and concise description of what the bug is."
-      placeholder: "e.g. When umounting an app, ReZygisk causes the app to crash. This is happens consistently when adding any app to the Denylist and trying to open it immediately after."
+      placeholder: "e.g. When umounting an app, VexZygisk causes the app to crash. This is happens consistently when adding any app to the Denylist and trying to open it immediately after."
     validations:
       required: true
 
@@ -80,13 +80,13 @@ body:
       label: Confirmations
       description: The following confirmations are required to open a bug report. Not completing this checkmark's requirements will lead to the invalidation of this Issue.
       options:
-        - label: I am currently using the latest CI version of ReZygisk while reporting this Issue
+        - label: I am currently using the latest CI version of VexZygisk while reporting this Issue
           required: true
         - label: My environment meets the minimum requirements.
           required: true
         - label: I have ASSURED that no other Issue has been made about the same topic.
           required: true
-        - label: I have acquired the [MDA](https://github.com/ThePedroo/DebugAssistant) redacted log, utilizing the debug version of ReZygisk, and after creating this Issue, I will send it to performancorg@gmail.com or one of the project maintainers, with the GitHub Issue link included in the e-mail and the log attached.
+        - label: I have acquired the [MDA](https://github.com/ThePedroo/DebugAssistant) redacted log, utilizing the debug version of VexZygisk, and after creating this Issue, I will send it to performancorg@gmail.com or one of the project maintainers, with the GitHub Issue link included in the e-mail and the log attached.
           required: true
         - label: I have written, in all the fields above, using English, and I will be able to provide more information in English if required by the maintainers.
           required: true

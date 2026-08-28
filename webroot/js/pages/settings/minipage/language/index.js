@@ -6,7 +6,7 @@ let availableLanguages = [ -1 /* INFO: To tell we haven't checked yet */ ]
 
 // async function _setNewThemeIcon() {
 //   const back_icon = document.getElementById('sp_lang_close')
-//   const sys_theme = localStorage.getItem('/ReZygisk/theme')
+//   const sys_theme = localStorage.getItem('/VexZygisk/theme')
 //   if (!sys_theme) return;
 //   if (sys_theme == 'light') {
 //     back_icon.classList.add('light_icon_mode')

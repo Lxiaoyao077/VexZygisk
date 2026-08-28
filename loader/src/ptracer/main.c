@@ -6,7 +6,7 @@
 #include "monitor.h"
 
 int main(int argc, char **argv) {
-  printf("The ReZygisk Tracer %s\n\n", ZKSU_VERSION);
+  printf("The VexZygisk Tracer %s\n\n", ZKSU_VERSION);
 
   if (argc >= 2 && strcmp(argv[1], "monitor") == 0) {
     init_monitor();
@@ -42,18 +42,18 @@ int main(int argc, char **argv) {
     else if (strcmp(argv[2], "stop") == 0) command = STOP;
     else if (strcmp(argv[2], "exit") == 0) command = EXIT;
     else {
-      printf("[ReZygisk]: Usage: %s ctl <start|stop|exit>\n", argv[0]);
+      printf("[VexZygisk]: Usage: %s ctl <start|stop|exit>\n", argv[0]);
 
       return 1;
     }
 
     if (send_control_command(command) == -1) {
-      printf("[ReZygisk]: Failed to send the command, is the daemon running?\n");
+      printf("[VexZygisk]: Failed to send the command, is the daemon running?\n");
 
       return 1;
     }
 
-    printf("[ReZygisk]: command sent\n");
+    printf("[VexZygisk]: command sent\n");
 
     return 0;
   } else if (argc >= 2 && strcmp(argv[1], "version") == 0) {
@@ -67,23 +67,8 @@ int main(int argc, char **argv) {
     printf("Daemon process PID: %d\n", info.pid);
 
     switch (info.root_impl) {
-      case ROOT_IMPL_NONE: {
-        printf("Root implementation: none\n");
-
-        break;
-      }
-      case ROOT_IMPL_APATCH: {
-        printf("Root implementation: APatch\n");
-
-        break;
-      }
       case ROOT_IMPL_KERNELSU: {
         printf("Root implementation: KernelSU\n");
-
-        break;
-      }
-      case ROOT_IMPL_MAGISK: {
-        printf("Root implementation: Magisk\n");
 
         break;
       }
@@ -108,7 +93,7 @@ int main(int argc, char **argv) {
       " - monitor\n"
       " - trace <pid> [--restart]\n"
       " - ctl <start|stop|exit>\n"
-      " - version: Shows the version of ReZygisk.\n"
+      " - version: Shows the version of VexZygisk.\n"
       " - info: Shows information about the created daemon/injection.\n"
       "\n"
       "<...>: Obligatory\n"

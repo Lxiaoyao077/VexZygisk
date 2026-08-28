@@ -3,7 +3,7 @@ import utils from '../utils.js'
 import { fullScreen } from '../../kernelsu.js'
 
 function _writeState(ConfigState) {
-  return localStorage.setItem('/ReZygisk/webui_config', JSON.stringify(ConfigState))
+  return localStorage.setItem('/VexZygisk/webui_config', JSON.stringify(ConfigState))
 }
 
 export async function loadOnce() {
@@ -24,10 +24,10 @@ export async function load() {
     enableSystemFont: false
   }
 
-  let webui_config = localStorage.getItem('/ReZygisk/webui_config')
+  let webui_config = localStorage.getItem('/VexZygisk/webui_config')
 
   if (!webui_config) {
-    localStorage.setItem('/ReZygisk/webui_config', JSON.stringify(ConfigState))
+    localStorage.setItem('/VexZygisk/webui_config', JSON.stringify(ConfigState))
   } else {
     ConfigState = JSON.parse(webui_config)
   }

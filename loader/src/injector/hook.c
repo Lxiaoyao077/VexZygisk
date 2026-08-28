@@ -229,7 +229,7 @@ static bool update_mnt_ns(enum mount_namespace_state mns_state, bool dry_run) {
   ret (*old_##func)(__VA_ARGS__);     \
   ret new_##func(__VA_ARGS__)
 
-/* INFO: ReZygisk already performs a fork in zygisk_context::fork_pre, because of that,
+/* INFO: VexZygisk already performs a fork in zygisk_context::fork_pre, because of that,
            we avoid duplicate fork in nativeForkAndSpecialize and nativeForkSystemServer
            by caching the pid in fork_pre function and only performing fork if the pid
            is non-0, or in other words, if we (libzygisk.so) already forked.
@@ -516,7 +516,7 @@ static void initialize_jni_hook(void) {
   can_hook_jni = true;
   do_hook_zygote(env);
 
-  /* INFO: ART leaks through libc strings from ReZygisk. We immediately
+  /* INFO: ART leaks through libc strings from VexZygisk. We immediately
              clear them here. */
   registers_clear();
 }
@@ -938,7 +938,7 @@ static void rz_fork_post(struct zygisk_context *ctx __attribute__((unused))) {
 static bool load_modules_only(void) {
   struct zygisk_modules ms;
   if (!rezygiskd_read_modules(&ms)) {
-    LOGE("Failed to read modules from ReZygiskd");
+    LOGE("Failed to read modules from VexZygiskd");
 
     return false;
   }
@@ -959,9 +959,9 @@ static bool load_modules_only(void) {
       LOGE("Failed to load module [%s]", lib_path);
 
       /* INFO: In case a module failed to load, update the list of available modules
-           in ReZygiskd to avoid a mismatch between the loaded modules in ReZygisk
-           Zygote library and the available modules in ReZygiskd. */
-      /* TODO: Update the list of modules for ReZygisk monitor, so that it can update
+           in VexZygiskd to avoid a mismatch between the loaded modules in VexZygisk
+           Zygote library and the available modules in VexZygiskd. */
+      /* TODO: Update the list of modules for VexZygisk monitor, so that it can update
                  for WebUI. That is simply cosmetic, though. */
       rezygiskd_remove_module(i);
 
@@ -1039,7 +1039,7 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
 
   /* INFO: Isolated services have different UIDs than the main apps. Because
               numerous root implementations base themselves in the UID of the
-              app, we need to ensure that the UID sent to ReZygiskd to search
+              app, we need to ensure that the UID sent to VexZygiskd to search
               is the app's and not the isolated service, or else it will be
               able to bypass DenyList.
 
@@ -1098,14 +1098,8 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
     LOGD("Manager process detected. Notifying that Zygisk has been enabled.");
 
 
-    /* INFO: This environment variable is related to Magisk Zygisk/Manager. It
-               it used by Magisk's Zygisk to communicate to Magisk Manager whether
-               Zygisk is working or not, allowing Zygisk modules to both work properly
-               and for the manager to mark Zygisk as enabled.
-
-             However, to enhance capabilities of root managers, it is also set for
-               any other supported manager, so that, if they wish, they can recognize
-               if Zygisk is enabled.
+    /* INFO: Tells the root manager that Zygisk is working, so that it can be
+               recognized as enabled and Zygisk modules work properly.
     */
     setenv("ZYGISK_ENABLED", "1", 1);
   }
@@ -1349,7 +1343,7 @@ static void hook_unloader(void) {
     LOGE("Failed to load modules in hook_unloader");
   }
 
-  LOGD("ReZygisk unloader hooked successfully");
+  LOGD("VexZygisk unloader hooked successfully");
 }
 
 static void unhook_functions(void) {

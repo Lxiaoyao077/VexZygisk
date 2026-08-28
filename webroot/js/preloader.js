@@ -5,11 +5,11 @@ import { setLight } from './themes/light.js'
 import { loadPage } from './pages/pageLoader.js'
 
 /* INFO: This sets the default theme to system if not set */
-let sys_theme = localStorage.getItem('/ReZygisk/theme')
+let sys_theme = localStorage.getItem('/VexZygisk/theme')
 if (!sys_theme) sys_theme = setThemeData('system')
 themeList[sys_theme](true)
 
-const ConfigState = JSON.parse(localStorage.getItem('/ReZygisk/webui_config') || '{}')
+const ConfigState = JSON.parse(localStorage.getItem('/VexZygisk/webui_config') || '{}')
 
 if (!ConfigState.disableFullscreen) fullScreen(true)
 

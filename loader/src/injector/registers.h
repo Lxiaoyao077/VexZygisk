@@ -8,7 +8,7 @@
 
          To address this, we provide a function to clear these registers. To assure
            we will not leave the string data in the registers, which can be abused
-           to detect ReZygisk.
+           to detect VexZygisk.
 */
 
 #ifndef REGISTERS_H

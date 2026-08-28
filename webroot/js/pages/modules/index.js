@@ -3,17 +3,17 @@ import { exec, toast } from '../../kernelsu.js'
 import { whichCurrentPage } from '../navbar.js'
 import { getStrings } from '../pageLoader.js'
 
-async function _getReZygiskState() {
+async function _getVexZygiskState() {
   let stateCmd = await exec('/system/bin/cat /data/adb/rezygisk/state.json')
   if (stateCmd.errno !== 0) {
-    toast('Error getting state of ReZygisk!')
+    toast('Error getting state of VexZygisk!')
 
     return;
   }
 
   try {
-    const ReZygiskState = JSON.parse(stateCmd.stdout)
-    return ReZygiskState
+    const VexZygiskState = JSON.parse(stateCmd.stdout)
+    return VexZygiskState
   } catch {
     return null;
   }
@@ -37,12 +37,12 @@ async function _getModuleNames(modules) {
 }
 
 async function _updateDynamicElement() {
-  const ReZygiskState = await _getReZygiskState()
+  const VexZygiskState = await _getVexZygiskState()
   const all_modules = []
   const strings = await getStrings(whichCurrentPage())
 
-  if (ReZygiskState.rezygiskd) Object.keys(ReZygiskState.rezygiskd).forEach((daemon_bit) => {
-    const daemon = ReZygiskState.rezygiskd[daemon_bit]
+  if (VexZygiskState.rezygiskd) Object.keys(VexZygiskState.rezygiskd).forEach((daemon_bit) => {
+    const daemon = VexZygiskState.rezygiskd[daemon_bit]
 
     if (daemon.modules && daemon.modules.length > 0) {
       daemon.modules.forEach((module_id) => {

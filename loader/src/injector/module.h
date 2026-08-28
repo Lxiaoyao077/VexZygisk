@@ -16,9 +16,7 @@ enum rezygiskd_flags : uint32_t {
   PROCESS_ON_DENYLIST = (1u << 1),
 
   PROCESS_IS_MANAGER = (1u << 27),
-  PROCESS_ROOT_IS_APATCH = (1u << 28),
   PROCESS_ROOT_IS_KSU = (1u << 29),
-  PROCESS_ROOT_IS_MAGISK = (1u << 30),
   PROCESS_IS_FIRST_STARTED = (1u << 31),
 
   PRIVATE_MASK = PROCESS_IS_FIRST_STARTED
@@ -97,17 +95,17 @@ struct server_specialize_args_v1 {
 };
 
 enum rezygisk_options {
-  /* INFO: Force ReZygisk to umount the root related mounts on this process. This option
-             will only take effect if set in pre...Specialize, as ReZygisk umounts at
+  /* INFO: Force VexZygisk to umount the root related mounts on this process. This option
+             will only take effect if set in pre...Specialize, as VexZygisk umounts at
              that point.
 
-           ReZygisk Umount System will not umount all root related mounts, read ReZygiskd
+           VexZygisk Umount System will not umount all root related mounts, read VexZygiskd
              umount_root function in utils.c file to understand how it selects the ones
              to umount.
   */
   FORCE_DENYLIST_UNMOUNT = 0,
 
-  /* INFO: Once set, ReZygisk will dlclose your library from the process, this is assured to
+  /* INFO: Once set, VexZygisk will dlclose your library from the process, this is assured to
              happen after post...Specialize, but not at a specific moment due to different
              implementations.
 

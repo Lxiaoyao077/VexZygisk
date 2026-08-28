@@ -22,7 +22,7 @@ export function setLight(chooseSet) {
 }
 
 function setData(mode) {
-  localStorage.setItem('/ReZygisk/theme', mode)
+  localStorage.setItem('/VexZygisk/theme', mode)
 
   return mode
 }

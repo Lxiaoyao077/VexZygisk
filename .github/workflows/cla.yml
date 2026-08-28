@@ -22,7 +22,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PERSONAL_ACCESS_TOKEN: ${{ secrets.PERFORMANC_BOT_ACCESS_TOKEN }}
         with:
-          path-to-signatures: 'signatures/ReZygisk/cla.json'
+          path-to-signatures: 'signatures/VexZygisk/cla.json'
           path-to-document: 'https://github.com/PerformanC/contributing/blob/main/CLA.md'
           branch: 'main'
 

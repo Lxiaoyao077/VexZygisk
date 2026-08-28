@@ -1,10 +1,10 @@
-# ReZygisk
+# VexZygisk
 
 [English](../README.md)
 
-ReZygisk làm một nhánh phát triển lấy từ ZygiskNext, một triển khai độc lập của Zygisk, cung cấp và hỗ trợ Zygisk API cho KernelSU, APatch và Magisk.
+VexZygisk làm một nhánh phát triển lấy từ ZygiskNext, một triển khai độc lập của Zygisk, cung cấp và hỗ trợ Zygisk API cho KernelSU.
 
-Toàn bộ mã nguồn đã được viết lại hoàn toàn bằng C, không chỉ giúp mã nguồn trở nên gọn gàng và dễ theo dõi hơn, mà còn tạo ra các file nhị phân nhẹ hơn và chạy nhanh hơn. Các linker tùy chỉnh cũng đã được giới thiệu nhằm “future-proof” ReZygisk trước các cơ chế phát hiện trong tương lai; trong điều kiện bình thường, hệ thống không sử dụng system linker, qua đó vô hiệu hóa mọi phương pháp phát hiện dựa trên linker.
+Toàn bộ mã nguồn đã được viết lại hoàn toàn bằng C, không chỉ giúp mã nguồn trở nên gọn gàng và dễ theo dõi hơn, mà còn tạo ra các file nhị phân nhẹ hơn và chạy nhanh hơn. Các linker tùy chỉnh cũng đã được giới thiệu nhằm “future-proof” VexZygisk trước các cơ chế phát hiện trong tương lai; trong điều kiện bình thường, hệ thống không sử dụng system linker, qua đó vô hiệu hóa mọi phương pháp phát hiện dựa trên linker.
 
 ## Tại sao nhánh phát triển này lại xuất hiện?
 
@@ -33,7 +33,7 @@ Các nhà phát triển Zygisk Next đều là những người nổi tiếng v�
 
 ### 1. Sử dụng đúng tệp zip
 
-Chọn đúng tệp bản dựng / zip là một điều tất yếu, bởi nó sẽ xác định khả năng ẩn của ReZygisk. Về cơ bản đây không phải là một việc khó:
+Chọn đúng tệp bản dựng / zip là một điều tất yếu, bởi nó sẽ xác định khả năng ẩn của VexZygisk. Về cơ bản đây không phải là một việc khó:
 
 - `release` bản này sẽ được chọn trong hầu hết các trường hợp sử dụng, bản này loại bỏ nhật ký phát triển cấp độ ứng dụng và cung cấp các tệp nhị phân được tối ưu hóa hơn.
 - `debug`,  bản này tuy nhiên không được tối ưu và đi kèm với nó là ghi lại nhật ký phát triển khá nhiều. Vì lý do này, **chỉ nên sử dụng khi cần gỡ lỗi** và **khi cần ghi lại nhật lý để tạo báo về lỗi hoặc những vấn đề tương tự**.
@@ -42,30 +42,30 @@ Chọn đúng tệp bản dựng / zip là một điều tất yếu, bởi nó 
 
 ### 2. Flash tệp zip
 
-Sau khi chọn một bản dựng phù hợp với bạn, điều cần làm là flash nó bằng trình quản lý root như Magisk hay KernelSU. Bạn có thể làm điều này bằng cách vào mục `Mô-đun / Module` của trình quản lý root của bạn và chọn tệp zip vừa tải xuống.
+Sau khi chọn một bản dựng phù hợp với bạn, điều cần làm là flash nó bằng ứng dụng KernelSU. Bạn có thể làm điều này bằng cách vào mục `Mô-đun / Module` của trình quản lý root của bạn và chọn tệp zip vừa tải xuống.
 
 Sau khi flash, kiểm tra lại nhật ký lỗi để chắc chắn rằng không có lỗi nào xảy ra, nếu mọi thứ xuôn sẻ, khởi động lại thiết bị.
 
-> [!WARNING]
-> Người dùng Magisk cần phải tắt `built-in Zygisk`, bởi nó sẽ xung đột với ReZygisk. Điều này có thể thực hiện bằng cách vào `Cài Đặt` và tắt tùy chọn `Zygisk`
-
 ### 3. Verify the installation
 
-Sau khi khởi động lại, bạn có thể xác minh ReZygisk có hoạt động bình thường không bằng cách kiểm tra mô tả module trong phần `Modules` của trình quản lý gốc. Mô tả sẽ chỉ ra rằng các daemon cần thiết đang chạy. Ví dụ, nếu môi trường của bạn hỗ trợ cả cấu trúctrúc 64-bit và 32-bit, nó sẽ trông giống như thế này: `[Monitor: ✅, ReZygisk 64-bit: ✅, ReZygisk 32-bit: ✅] Standalone implementation of Zygisk.`
+Sau khi khởi động lại, bạn có thể xác minh VexZygisk có hoạt động bình thường không bằng cách kiểm tra mô tả module trong phần `Modules` của trình quản lý gốc. Mô tả sẽ chỉ ra rằng các daemon cần thiết đang chạy và sẽ trông giống như thế này: `[Monitor: ✅, VexZygisk 64-bit: ✅] Standalone implementation of Zygisk.`
+
+> [!NOTE]
+> Chỉ Zygote khớp với ABI chính của thiết bị mới được inject. Trên thiết bị 64-bit, Zygote 32-bit phụ sẽ không bị động tới vì hiếm khi được dùng và việc inject nó không mang lại lợi ích; thiết bị chỉ có 32-bit vẫn được hỗ trợ đầy đủ.
 
 ## Dịch WebUI cho mô-đun
 
-Hiện tại có hai cách khác nhau để đóng góp bản dịch cho ReZygisk:
+Hiện tại có hai cách khác nhau để đóng góp bản dịch cho VexZygisk:
 
 - Đối với bản dịch của README, bạn có thể tạo một tệp mới trong thư mục `READMEs`, theo quy ước đặt tên `README_<language>.md`, trong đó `<language>` là mã ngôn ngữ (ví dụ: `README_pt-BR.md` cho tiếng Bồ Đào Nha Brazil) và mở yêu cầu kéo đến nhánh `main` với các thay đổi của bạn.
-- Đối với bản dịch của ReZygisk WebUI, trước tiên bạn phải đóng góp cho [Crowdin](https://crowdin.com/project/rezygisk) của chúng tôi. Sau khi được chấp thuận, hãy lấy tệp `.json` từ đó và mở yêu cầu kéo với các thay đổi của bạn -- thêm tệp `.json` vào thư mục `webroot/lang` và ghi công của bạn vào tệp `TRANSLATOR.md`, theo thứ tự bảng chữ cái.
+- Đối với bản dịch của VexZygisk WebUI, trước tiên bạn phải đóng góp cho [Crowdin](https://crowdin.com/project/rezygisk) của chúng tôi. Sau khi được chấp thuận, hãy lấy tệp `.json` từ đó và mở yêu cầu kéo với các thay đổi của bạn -- thêm tệp `.json` vào thư mục `webroot/lang` và ghi công của bạn vào tệp `TRANSLATOR.md`, theo thứ tự bảng chữ cái.
 
 ## Hỗ trợ
 
-Nếu bạn có những câu hỏi nào dành cho ReZygisk hoặc bất kì một dự án nào của PerformanC, hãy tự nhiên tham gia các kênh trò chuyện dưới đây:
+Nếu bạn có những câu hỏi nào dành cho VexZygisk hoặc bất kì một dự án nào của PerformanC, hãy tự nhiên tham gia các kênh trò chuyện dưới đây:
 
 - Kênh Discord: [PerformanC](https://discord.gg/uPveNfTuCJ)
-- Kênh Telegram ReZygisk: [@rezygisk](https://t.me/rezygisk)
+- Kênh Telegram VexZygisk: [@rezygisk](https://t.me/rezygisk)
 - Kênh Telegram PerformanC: [@performancorg](https://t.me/performancorg)
 - Nhóm Signal PerformanC: [@performanc](https://signal.group/#CjQKID3SS8N5y4lXj3VjjGxVJnzNsTIuaYZjj3i8UhipAS0gEhAedxPjT5WjbOs6FUuXptcT)
 
@@ -75,4 +75,4 @@ Tuân theo [hướng dẫn đóng góp](https://github.com/PerformanC/contributi
 
 ## Bản quyền
 
-ReZygisk được cấp phép theo bản quyền [AGPL 3.0](../LICENSE). Bạn có thể xem thêm trong trang [Open Source Initiative](https://opensource.org/licenses/AGPL-3.0).
+VexZygisk được cấp phép theo bản quyền [AGPL 3.0](../LICENSE). Bạn có thể xem thêm trong trang [Open Source Initiative](https://opensource.org/licenses/AGPL-3.0).

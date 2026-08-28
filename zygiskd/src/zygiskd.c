@@ -37,10 +37,6 @@ struct Context {
   #define ARCH_STR "arm64-v8a"
 #elif __arm__
   #define ARCH_STR "armeabi-v7a"
-#elif __x86_64__
-  #define ARCH_STR "x86_64"
-#elif __i386__
-  #define ARCH_STR "x86"
 #else
   #error "Unsupported architecture"
   #define ARCH_STR "unknown"

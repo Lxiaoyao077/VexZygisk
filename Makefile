@@ -74,7 +74,7 @@ $(MODULE_DONE): $(LOADER_DONE) $(ZYGISKD_DONE) $(MODULE_INPUTS)
 	    module/src/module.prop > $(MODULE_OUT)/module.prop
 
 	@echo "Customizing scripts..."
-	@for script in customize.sh post-fs-data.sh service.sh uninstall.sh; do \
+	@for script in customize.sh post-fs-data.sh uninstall.sh; do \
 		sed -e 's/@DEBUG@/$(if $(filter debug,$(BUILD_TYPE)),true,false)/g' \
 		    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'                   \
 		    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g'                 \

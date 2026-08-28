@@ -943,6 +943,10 @@ static bool load_modules_only(void) {
     return false;
   }
 
+  /* INFO: Reset the counter first: a second pass must not write past the fresh
+             buffer or leak the previous allocation. */
+  zygisk_module_length = 0;
+
   zygisk_modules = (struct rezygisk_module *)malloc(ms.modules_count * sizeof(struct rezygisk_module));
   if (!zygisk_modules) {
     LOGE("Failed to allocate memory for modules");
@@ -1271,6 +1275,7 @@ static void rz_cleanup(struct zygisk_context *ctx) {
   for (size_t i = 0; i < zygisk_module_length; i++) {
     memset(&zygisk_modules[i], 0, sizeof(zygisk_modules[i]));
   }
+  zygisk_module_length = 0;
 
   enable_unloader = true;
   pthread_mutex_destroy(&ctx->hook_info_lock);

@@ -3,9 +3,6 @@
 set -e
 
 MODDIR=${0%/*}
-if [ "$ZYGISK_ENABLED" ]; then
-  exit 0
-fi
 
 cd "$MODDIR"
 

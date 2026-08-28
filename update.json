@@ -1,6 +1,6 @@
 {
   "version": "v2.0.0",
-  "versionCode": 545,
-  "zipUrl": "https://github.com/Lxiaoyao077/VexZygisk/releases/download/v2.0.0/VexZygisk-v2.0.0-545-e72eefd-release.zip",
-  "changelog": "VexZygisk v2.0.0\n\n- KernelSU only: Magisk, APatch, KernelSU-Next and the legacy KernelSU interfaces are gone\n- x86 and x86_64 support removed\n- 64-bit devices no longer inject the secondary 32-bit Zygote\n- Amoled is the only WebUI theme and it is always applied\n- The WebUI follows the device language\n- The actions page only reports the monitor state\n- The settings page lost the theme and language entries\n- Dead code cleaned up across the native code and the WebUI"
+  "versionCode": 548,
+  "zipUrl": "https://github.com/Lxiaoyao077/VexZygisk/releases/download/v2.0.0/VexZygisk-v2.0.0-548-36bc6bd-release.zip",
+  "changelog": "VexZygisk v2.0.0\n\n- KernelSU only: Magisk, APatch, KernelSU-Next and the legacy KernelSU interfaces are gone\n- x86 and x86_64 support removed\n- 64-bit devices no longer inject the secondary 32-bit Zygote\n- WebUI: only home and modules pages remain, the monitor state moved to home under the root implementation, the actions and settings pages are gone\n- Amoled is the only WebUI theme and it is always applied\n- The WebUI follows the device language\n- Dead code cleaned up across the native code and the WebUI"
 }

@@ -27,7 +27,7 @@ const developmentResponse = {
   },
   'cat /data/adb/modules/rezygisk/module.prop': {
     errno: 0,
-    stdout: 'version=v1.0.0 (505-7e3db00-release)',
+    stdout: 'version=v2.0.0 (505-7e3db00-release)',
     stderr: ''
   },
   '/system/bin/uname -r': {

@@ -4,4 +4,5 @@ version=${versionName}
 versionCode=${versionCode}
 author=Lxyao & The PerformanC Organization
 description=Standalone implementation of Zygisk.
+updateJson=https://raw.githubusercontent.com/Lxiaoyao077/VexZygisk/main/update.json
 managedFeatures=kernel_umount

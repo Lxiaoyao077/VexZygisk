@@ -19,10 +19,7 @@
           "notInjected": "Not Injected",
           "unknown": "Unknown"
         }
-      }
-    },
-    "actions": {
-      "title": "Actions",
+      },
       "monitor": {
         "title": "Monitor",
         "status": {
@@ -38,21 +35,6 @@
       "title": "Modules",
       "notAvaliable": "No modules using Zygisk here.",
       "arch": "Architecture: "
-    },
-    "settings": {
-      "title": "Settings",
-      "fullscreen": {
-        "title": "Disable fullscreen mode in WebUI",
-        "description": "This option will make the WebUI not fill the whole screen."
-      },
-      "font": {
-        "title": "Enable system font",
-        "description": "This option will enable system font in current WebUI. NOTE: May not be compatible with FlipFont"
-      },
-      "moduleDevelopers": "Module Developer(s)",
-      "WebUIDevelopers": "WebUI Developer(s)",
-      "orginalDevelopers": "Original Module Developer(s)",
-      "moduleLicense": "Module License"
     }
   },
   "globals": {

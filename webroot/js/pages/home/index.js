@@ -68,6 +68,18 @@ async function _getAndroidVersion() {
   }
 }
 
+function _getMonitorStatus(VexZygiskState, strings) {
+  if (VexZygiskState == null) return strings.unknown
+
+  switch (VexZygiskState.monitor.state) {
+    case '0': return strings.monitor.status.tracing
+    case '1': return strings.monitor.status.stopping
+    case '2': return strings.monitor.status.stopped
+    case '3': return strings.monitor.status.exiting
+    default: return strings.monitor.status.unknown
+  }
+}
+
 async function _updateDynamicElement(firstRun, VexZygiskState, strings) {
   const rootCss = document.querySelector(':root')
   const rz_state = document.getElementById('rz_state')
@@ -183,5 +195,8 @@ export async function loadOnceView() {
 }
 
 export async function load() {
+  const VexZygiskState = await _getVexZygiskState()
+  const strings = await getStrings(whichCurrentPage())
 
+  document.getElementById('monitor_status').innerHTML = _getMonitorStatus(VexZygiskState, strings)
 }

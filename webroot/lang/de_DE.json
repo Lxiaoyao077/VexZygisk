@@ -19,10 +19,7 @@
           "notInjected": "Nicht Injiziert",
           "unknown": "Unbekannt"
         }
-      }
-    },
-    "actions": {
-      "title": "Aktionen",
+      },
       "monitor": {
         "title": "Monitor",
         "status": {
@@ -38,21 +35,6 @@
       "title": "Module",
       "notAvaliable": "Keine Zygisk-Module hier ...",
       "arch": "Architektur: "
-    },
-    "settings": {
-      "title": "Einstellungen",
-      "fullscreen": {
-        "title": "WebUI-Vollbildmodus deaktivieren",
-        "description": "Lässt die WebUI nicht den kompletten Bildschirm einnehmen"
-      },
-      "font": {
-        "title": "System Schriftart benutzen",
-        "description": "Benutze die System Schriftart, Achtung: möglicherweise inkompatibel mit FLIPFONT"
-      },
-      "moduleDevelopers": "Modul Entwickler*innen",
-      "WebUIDevelopers": "WebUI Entwickler*innen",
-      "orginalDevelopers": "Original Modul Entwickler*innen",
-      "moduleLicense": "Modul Lizenz"
     }
   },
   "globals": {

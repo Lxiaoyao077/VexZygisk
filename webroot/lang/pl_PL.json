@@ -19,10 +19,7 @@
           "notInjected": "Nie wstrzyknięta",
           "unknown": "Nieznany"
         }
-      }
-    },
-    "actions": {
-      "title": "Akcje",
+      },
       "monitor": {
         "title": "Monitor",
         "status": {
@@ -38,22 +35,6 @@
       "title": "Moduły",
       "notAvaliable": "Brak modułów używających Zygisk.",
       "arch": "Architektura: "
-    },
-    "settings": {
-      "title": "Ustawienia",
-      "fullscreen": {
-        "title": "Wyłącz tryb pełnoekranowy w WebUI",
-        "description": "Ta opcja sprawi, że WebUI nie będzie wypełniać całego ekranu."
-      },
-      "font": {
-        "title": "Włącz czcionkę systemową",
-        "description": "Ta opcja włączy czcionkę systemową w bieżącym WebUI. UWAGA: Może być nie kompatybilna z FlipFont"
-      },
-      "moduleDevelopers": "Autorzy modułu",
-      "WebUIDevelopers": "Autorzy WebUI",
-      "orginalDevelopers": "Oryginalni autorzy modułu",
-      "moduleLicense": "Licencja modułu",
-      "WebUILicense": "Licencja WebUI"
     }
   },
   "globals": {

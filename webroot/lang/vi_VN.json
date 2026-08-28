@@ -19,10 +19,7 @@
           "notInjected": "Chưa can thiệp",
           "unknown": "Không xác định"
         }
-      }
-    },
-    "actions": {
-      "title": "Trình điều khiển",
+      },
       "monitor": {
         "title": "Trình theo dõi",
         "status": {
@@ -38,21 +35,6 @@
       "title": "Mô Đun",
       "notAvaliable": "Không có mô-đun nào sử dụng Zygisk ở đây!",
       "arch": "Kiến trúc: "
-    },
-    "settings": {
-      "title": "Cài đặt",
-      "fullscreen": {
-        "title": "Vô hiệu hóa chế độ toàn màn hình trên WebUI",
-        "description": "Tùy chọn này sẽ khiến cho WebUI không còn ở toàn màn hình."
-      },
-      "font": {
-        "title": "Sử dụng phông chữ hệ thống",
-        "description": "Tuỳ chọn này sẽ cho phép người dùng sử dụng phông chữ của hệ thống. LƯU Ý: Có thể sẽ không tương thích với FlipFont"
-      },
-      "moduleDevelopers": "Những nhà phát triển mô-đun",
-      "WebUIDevelopers": "Những nhà phát triển WebUI",
-      "orginalDevelopers": "Những nhà phát triển mô-đun gốc",
-      "moduleLicense": "Giấy phép bản quyền mô-đun"
     }
   },
   "globals": {

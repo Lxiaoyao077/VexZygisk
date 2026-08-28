@@ -3,16 +3,11 @@ import { exec, toast } from '../kernelsu.js'
 import { loadNavbar, setNavbar, whichCurrentPage } from './navbar.js'
 import { runMainPageTransition } from './animator.js'
 
-/* INFO: Prototypes */
-import utils from './utils.js'
-
 const head = document.getElementsByTagName('head')[0]
 
 export const allPages = [
   'home',
-  'modules',
-  'actions',
-  'settings'
+  'modules'
 ]
 
 const loadedPageView = []
@@ -147,9 +142,7 @@ async function initializePage(pageId, pageSpecificContent, shouldApplyHTMLChange
   module.load()
 }
 
-function unuseHTML(page, pageId, shouldRemoveListeners = true) {
-  /* INFO: Remove all event listeners from window */
-  if (shouldRemoveListeners) utils.removeAllListeners()
+function unuseHTML(page, pageId) {
   const pagePrefix = `page_${pageId}:`
 
   if (page.childNodes) page.childNodes.forEach((child) => {
@@ -174,7 +167,7 @@ function unuseHTML(page, pageId, shouldRemoveListeners = true) {
       }
     }
 
-    unuseHTML(child, pageId, false)
+    unuseHTML(child, pageId)
   })
 }
 
@@ -338,12 +331,11 @@ export async function loadPage(pageId) {
     const currentPageContent = document.getElementById(`${currentPage}_content`)
     const transitionDirection = allPages.indexOf(pageId) > allPages.indexOf(currentPage) ? 1 : -1
 
-    utils.removeAllListeners()
     await initializePage(pageId, pageSpecificContent, targetNeedsRevert)
 
     await runMainPageTransition(currentPageContent, pageSpecificContent, transitionDirection)
 
-    unuseHTML(currentPageContent, currentPage, false)
+    unuseHTML(currentPageContent, currentPage)
     document.getElementById(`${currentPage}_css`).media = 'not all'
 
     return true
@@ -361,19 +353,6 @@ export async function loadPage(pageId) {
     else if (pageId !== 'home' && currentPage === 'home')
       history.pushState(true, '', location.pathname)
   }
-}
-
-export async function reloadPage() {
-  const pageId = whichCurrentPage()
-
-  const pageSpecificContent = document.getElementById(`${pageId}_content`)
-  pageSpecificContent.innerHTML = await solveStrings(await loadHTML(pageId), pageId)
-
-  const module = await importPageJS(pageId)
-  module.load()
-  /* INFO: When reloading the page, due to the way the HTML is reloaded, the JavaScript
-             listeners are lost, so we need to reapply them to ensure everything works. */
-  utils.reapplyListeners()
 }
 
 async function fetchStrings(pageId, language) {

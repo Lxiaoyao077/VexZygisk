@@ -19,10 +19,7 @@
           "notInjected": "No inyectado",
           "unknown": "Desconocido"
         }
-      }
-    },
-    "actions": {
-      "title": "Acciones",
+      },
       "monitor": {
         "title": "Monitor",
         "status": {
@@ -38,21 +35,6 @@
       "title": "Módulos",
       "notAvaliable": "No hay módulos que usen Zygisk aquí.",
       "arch": "Arquitectura: "
-    },
-    "settings": {
-      "title": "Ajustes",
-      "fullscreen": {
-        "title": "Desactivar el modo de pantalla completa en el WebUI",
-        "description": "Esta opción evitará que el WebUI ocupe toda la pantalla."
-      },
-      "font": {
-        "title": "Activar fuente del sistema",
-        "description": "Esta opción habilitará la fuente del sistema en el WebUI actual. NOTA: Puede no ser compatible con FlipFont"
-      },
-      "moduleDevelopers": "Desarrollador(es) del módulo",
-      "WebUIDevelopers": "Desarrollador(es) del WebUI",
-      "orginalDevelopers": "Desarrollador(es) del Modulo Original",
-      "moduleLicense": "Licencia del Modulo"
     }
   },
   "globals": {

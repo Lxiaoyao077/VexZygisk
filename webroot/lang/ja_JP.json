@@ -19,10 +19,7 @@
           "notInjected": "未インジェクト",
           "unknown": "不明"
         }
-      }
-    },
-    "actions": {
-      "title": "アクション",
+      },
       "monitor": {
         "title": "監視",
         "status": {
@@ -38,21 +35,6 @@
       "title": "モジュール",
       "notAvaliable": "Zygisk を使用するモジュールはありません。",
       "arch": "アーキテクチャ: "
-    },
-    "settings": {
-      "title": "設定",
-      "fullscreen": {
-        "title": "WebUI の全画面表示を無効化",
-        "description": "このオプションを有効にすると、WebUI は全画面表示されなくなります。"
-      },
-      "font": {
-        "title": "システムフォントを有効化",
-        "description": "現在の WebUI でシステムフォントの使用を有効化します。注意: FlipFont との互換性がない場合があります"
-      },
-      "moduleDevelopers": "モジュールの開発者",
-      "WebUIDevelopers": "WebUI の開発者",
-      "orginalDevelopers": "オリジナルのモジュールの開発者",
-      "moduleLicense": "モジュールのライセンス"
     }
   },
   "globals": {

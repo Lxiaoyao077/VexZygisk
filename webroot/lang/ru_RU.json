@@ -19,10 +19,7 @@
           "notInjected": "Не инъецировано",
           "unknown": "Неизвестно"
         }
-      }
-    },
-    "actions": {
-      "title": "Действия",
+      },
       "monitor": {
         "title": "Обзор",
         "status": {
@@ -38,21 +35,6 @@
       "title": "Модули",
       "notAvaliable": "Здесь нет модулей, использующих Zygisk.",
       "arch": "Архитектура: "
-    },
-    "settings": {
-      "title": "Настройки",
-      "fullscreen": {
-        "title": "Выключить полноэкранный режим в WebUI",
-        "description": "С данной опцией, WebUI не будет занимать весь экран."
-      },
-      "font": {
-        "title": "Включить системный шрифт",
-        "description": "Эта опция включит системный шрифт в текущем WebUI. ПРИМЕЧАНИЕ: Может быть несовместимо с FlipFont"
-      },
-      "moduleDevelopers": "Разработчик(и) модуля",
-      "WebUIDevelopers": "Разработчик(и) WebUI",
-      "orginalDevelopers": "Разработчик(и) оригинального модуля",
-      "moduleLicense": "Лицензия модуля"
     }
   },
   "globals": {

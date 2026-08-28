@@ -19,10 +19,7 @@
           "notInjected": "未注入",
           "unknown": "未知"
         }
-      }
-    },
-    "actions": {
-      "title": "操作",
+      },
       "monitor": {
         "title": "监控",
         "status": {
@@ -38,21 +35,6 @@
       "title": "模块",
       "notAvaliable": "目前没有模块使用 Zygisk",
       "arch": "架构: "
-    },
-    "settings": {
-      "title": "设置",
-      "fullscreen": {
-        "title": "禁用 WebUI 全屏模式",
-        "description": "启用此选项后，WebUI 将不会占满整个屏幕。"
-      },
-      "font": {
-        "title": "启用系统字体",
-        "description": "此选项会在Web界面启用系统字体。可能与FlipFont不兼容。"
-      },
-      "moduleDevelopers": "模块开发者",
-      "WebUIDevelopers": "WebUI 开发者",
-      "orginalDevelopers": "原始模块开发者",
-      "moduleLicense": "模块许可证"
     }
   },
   "globals": {

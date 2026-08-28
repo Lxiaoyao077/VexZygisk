@@ -19,10 +19,7 @@
           "notInjected": "Enjekte Edilmedi",
           "unknown": "Bilinmiyor"
         }
-      }
-    },
-    "actions": {
-      "title": "İşlemler",
+      },
       "monitor": {
         "title": "Durum",
         "status": {
@@ -38,21 +35,6 @@
       "title": "Modüller",
       "notAvaliable": "Zygisk kullanan hiçbir modül yok.",
       "arch": "Mimari: "
-    },
-    "settings": {
-      "title": "Ayarlar",
-      "fullscreen": {
-        "title": "WebUI'de tam ekran modunu devre dışı bırak",
-        "description": "Bu seçenek, WebUI'nin ekranın tamamını kaplamamasını sağlayacaktır."
-      },
-      "font": {
-        "title": "Sistem yazı tipini etkinleştir",
-        "description": "Bu seçenek, mevcut WebUI sistem yazı tipini etkinleştirecektir.\nNOT: FlipFont ile uyumlu olmayabilir"
-      },
-      "moduleDevelopers": "Modül Geliştirici(leri)",
-      "WebUIDevelopers": "WebUI Geliştirici(leri)",
-      "orginalDevelopers": "Orijinal Modül Geliştirici(leri)",
-      "moduleLicense": "Modül Lisansı"
     }
   },
   "globals": {

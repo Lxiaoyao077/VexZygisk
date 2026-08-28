@@ -2,7 +2,7 @@ import { exec, toast } from '../../kernelsu.js'
 
 import { whichCurrentPage } from '../navbar.js'
 import { getStrings } from '../pageLoader.js'
-import { getVexZygiskState } from './state.js'
+import { getVexZygiskState } from '../state.js'
 
 async function _getModuleNames(modules) {
   const fullCommand = modules.map((mod) => {

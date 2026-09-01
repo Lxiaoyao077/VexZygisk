@@ -54,7 +54,6 @@ struct ZnModuleFile {
 #define TMP_PATH "/data/adb/rezygisk"
 #define CONTROLLER_SOCKET TMP_PATH "/init_monitor"
 #define PATH_CP_NAME TMP_PATH "/" LP_SELECT("cp32.sock", "cp64.sock")
-#define ZYGISKD_FILE PATH_MODULES_DIR "/rezygisk/bin/zygiskd" LP_SELECT("32", "64")
 #define ZYGISKD_PATH "/data/adb/modules/rezygisk/bin/zygiskd" LP_SELECT("32", "64")
 
 #ifdef __aarch64__
@@ -63,7 +62,6 @@ struct ZnModuleFile {
   #define ARCH_STR "armeabi-v7a"
 #else
   #error "Unsupported architecture"
-  #define ARCH_STR "unknown"
 #endif
 
 /* INFO: A trailing byte tells the monitor whether the module targets Zygisk Next */
@@ -203,7 +201,10 @@ static void load_modules(struct Context *restrict context) {
 
   struct dirent *entry;
   while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_type != DT_DIR) continue; /* INFO: Only directories */
+    /* INFO: Some filesystems (fuse, certain overlays) report DT_UNKNOWN, and
+             skipping those would silently drop every module, so the type is
+             only used to rule out what is definitely not a directory. */
+    if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
     if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 || strcmp(entry->d_name, "rezygisk") == 0) continue;
 
     char *name = entry->d_name;
@@ -253,19 +254,7 @@ static void load_modules(struct Context *restrict context) {
 
       close(lib_fd);
 
-      for (size_t i = 0; i < context->len; i++) {
-        free(context->modules[i].name);
-        if (context->modules[i].companion >= 0) close(context->modules[i].companion);
-        if (context->modules[i].lib_fd >= 0) close(context->modules[i].lib_fd);
-      }
-
-      free(context->modules);
-      context->modules = NULL;
-      context->len = 0;
-
-      closedir(dir);
-
-      return;
+      goto load_modules_fail;
     }
     context->modules = tmp_modules;
 
@@ -275,7 +264,7 @@ static void load_modules(struct Context *restrict context) {
 
       close(lib_fd);
 
-      return;
+      goto load_modules_fail;
     }
 
     context->modules[context->len].lib_fd = lib_fd;
@@ -284,6 +273,12 @@ static void load_modules(struct Context *restrict context) {
   }
 
   closedir(dir);
+
+  return;
+
+  load_modules_fail:
+    free_modules(context);
+    closedir(dir);
 }
 
 static void free_modules(struct Context *restrict context) {

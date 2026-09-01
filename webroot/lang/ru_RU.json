@@ -19,10 +19,7 @@
           "notInjected": "Не инъецировано",
           "unknown": "Неизвестно"
         }
-      }
-    },
-    "actions": {
-      "title": "Действия",
+      },
       "monitor": {
         "title": "Обзор",
         "status": {
@@ -31,11 +28,6 @@
           "stopped": "Остановлено",
           "exiting": "Выход",
           "unknown": "Неизвестно"
-        },
-        "button": {
-          "pause": "Пауза",
-          "stop": "Стоп",
-          "start": "Начать"
         }
       }
     },
@@ -43,41 +35,6 @@
       "title": "Модули",
       "notAvaliable": "Здесь нет модулей, использующих Zygisk.",
       "arch": "Архитектура: "
-    },
-    "settings": {
-      "title": "Настройки",
-      "language": {
-        "title": "Сменить язык",
-        "description": "Сменить язык WebUI на выбранный."
-      },
-      "fullscreen": {
-        "title": "Выключить полноэкранный режим в WebUI",
-        "description": "С данной опцией, WebUI не будет занимать весь экран."
-      },
-      "theme": {
-        "title": "Сменить тему WebUI",
-        "description": "Выберите вашу системную тему для текущего WebUI."
-      },
-      "font": {
-        "title": "Включить системный шрифт",
-        "description": "Эта опция включит системный шрифт в текущем WebUI. ПРИМЕЧАНИЕ: Может быть несовместимо с FlipFont"
-      },
-      "moduleDevelopers": "Разработчик(и) модуля",
-      "WebUIDevelopers": "Разработчик(и) WebUI",
-      "orginalDevelopers": "Разработчик(и) оригинального модуля",
-      "moduleLicense": "Лицензия модуля"
-    },
-    "mini_settings_language": {
-      "title": "Сменить язык"
-    },
-    "mini_settings_theme": {
-      "title": "Сменить тему WebUI",
-      "theme": {
-        "dark": "Тёмная тема",
-        "light": "Светлая тема",
-        "amoled": "Amoled тема",
-        "system_based": "Системная тема"
-      }
     }
   },
   "globals": {

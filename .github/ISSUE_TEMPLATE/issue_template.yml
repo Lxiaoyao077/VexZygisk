@@ -47,7 +47,7 @@ body:
       description: "ALL modules that are installed in the affected device. Provide status (enabled or disabled), name, creator, version, and link to its repository or website. You must follow the EXACT format of the placeholder below. The modules must be separated by status, the enabled ones first, and then the disabled ones, if any."
       placeholder: |
         e.g.
-        Enabled. VexZygisk by The PerformanC Organization, version 1.2.3, available at https://github.com/PerformanC/VexZygisk
+        Enabled. VexZygisk by Lxyao, version 1.2.3, available at https://github.com/Lxiaoyao077/VexZygisk
         Disabled. ReLSPosed by ThePedroo, version 3.2.1, available at https://github.com/ThePedroo/ReLSPosed
         ...
     validations:
@@ -86,7 +86,7 @@ body:
           required: true
         - label: I have ASSURED that no other Issue has been made about the same topic.
           required: true
-        - label: I have acquired the [MDA](https://github.com/ThePedroo/DebugAssistant) redacted log, utilizing the debug version of VexZygisk, and after creating this Issue, I will send it to performancorg@gmail.com or one of the project maintainers, with the GitHub Issue link included in the e-mail and the log attached.
+        - label: I have acquired the [MDA](https://github.com/ThePedroo/DebugAssistant) redacted log, utilizing the debug version of VexZygisk, and I will attach it to this Issue right after creating it.
           required: true
         - label: I have written, in all the fields above, using English, and I will be able to provide more information in English if required by the maintainers.
           required: true
@@ -95,7 +95,7 @@ body:
     id: code_of_conduct
     attributes:
       label: Code of Conduct
-      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/PerformanC/contributing/blob/main/CODE_OF_CONDUCT.md)
+      description: By submitting this issue, you agree to follow this project's Code of Conduct
       options:
         - label: I agree to follow this project's Code of Conduct
           required: true

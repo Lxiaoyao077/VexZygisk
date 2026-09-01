@@ -2,26 +2,11 @@ import { exec, toast } from '../../kernelsu.js'
 
 import { whichCurrentPage } from '../navbar.js'
 import { getStrings } from '../pageLoader.js'
+import { getVexZygiskState } from '../state.js'
 
 let rzState = {
   actuallyWorking: 0,
   expectedWorking: 0
-}
-
-async function _getVexZygiskState() {
-  let stateCmd = await exec('/system/bin/cat /data/adb/rezygisk/state.json')
-  if (stateCmd.errno !== 0) {
-    toast('Error getting state of VexZygisk!')
-
-    return;
-  }
-
-  try {
-    const VexZygiskState = JSON.parse(stateCmd.stdout)
-    return VexZygiskState
-  } catch {
-    return null;
-  }
 }
 
 async function _getVersion() {
@@ -68,6 +53,18 @@ async function _getAndroidVersion() {
   }
 }
 
+function _getMonitorStatus(VexZygiskState, strings) {
+  const status = strings.monitor?.status ?? {}
+
+  switch (VexZygiskState?.monitor?.state) {
+    case '0': return status.tracing
+    case '1': return status.stopping
+    case '2': return status.stopped
+    case '3': return status.exiting
+    default: return status.unknown ?? strings.unknown
+  }
+}
+
 async function _updateDynamicElement(firstRun, VexZygiskState, strings) {
   const rootCss = document.querySelector(':root')
   const rz_state = document.getElementById('rz_state')
@@ -93,7 +90,7 @@ async function _updateDynamicElement(firstRun, VexZygiskState, strings) {
     rz_icon_state.innerHTML = '<img class="brightc" src="assets/mark.svg">'
     document.getElementById('zygote_class').style.display = 'none'
     /* INFO: This hides the throbber screen */
-    loading_screen.style.display = 'none'
+    document.getElementById('loading_screen').style.display = 'none'
     return;
   }
 
@@ -167,27 +164,25 @@ export async function loadOnceView() {
   document.getElementById('kernel_version_div').innerHTML = await _getKernelString()
   document.getElementById('android_version_div').innerHTML = await _getAndroidVersion()
 
-  const VexZygiskState = await _getVexZygiskState()
+  const VexZygiskState = await getVexZygiskState()
   const strings = await getStrings(whichCurrentPage())
+
+  if (VexZygiskState === null) toast('Error getting state of VexZygisk!')
 
   let root_impl = VexZygiskState ? VexZygiskState.root : null
   if (!root_impl) root_impl = strings.unknown
-  if (root_impl === 'Multiple') root_impl = strings.rootImpls.multiple
 
   document.getElementById('root_impl').innerHTML = root_impl
 
   _updateDynamicElement(true, VexZygiskState, strings)
 
   /* INFO: This hides the throbber screen */
-  loading_screen.style.display = 'none'
-}
-
-export async function onceViewAfterUpdate() {
-  const VexZygiskState = await _getVexZygiskState()
-  const strings = await getStrings(whichCurrentPage())
-  _updateDynamicElement(false, VexZygiskState, strings)
+  document.getElementById('loading_screen').style.display = 'none'
 }
 
 export async function load() {
+  const VexZygiskState = await getVexZygiskState()
+  const strings = await getStrings(whichCurrentPage())
 
+  document.getElementById('monitor_status').innerHTML = _getMonitorStatus(VexZygiskState, strings)
 }

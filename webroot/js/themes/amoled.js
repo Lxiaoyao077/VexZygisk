@@ -2,7 +2,7 @@ import { setDarkNav } from './darkNavbar.js'
 
 const rootCss = document.querySelector(':root')
 
-export function setAmoled(chooseSet) {
+export function setAmoled() {
   rootCss.style.setProperty('--background', '#000000')
   rootCss.style.setProperty('--font', '#d9d9d9')
   rootCss.style.setProperty('--desc', '#a9a9a9')
@@ -14,12 +14,5 @@ export function setAmoled(chooseSet) {
   rootCss.style.setProperty('--icon-filter', 'invert(1)')
   rootCss.style.setProperty('--button', 'var(--background)')
 
-  if (chooseSet) setData('amoled')
   setDarkNav()
-}
-
-function setData(mode) {
-  localStorage.setItem('/VexZygisk/theme', mode)
-
-  return mode
 }

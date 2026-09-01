@@ -45,7 +45,7 @@
   position: fixed;
   z-index: 7;
   align-items: center;
-  justify-content: space-between;
+  justify-content: space-evenly;
   background-color: var(--dim);
   left: 0; right: 0; bottom: 0;
   padding: 20px 25px;

@@ -1,10 +1,10 @@
 ROOT_DIR ?= .
 BUILD_TYPE ?= debug
 API_LEVEL ?= 25
-ARCHS ?= arm64-v8a armeabi-v7a x86 x86_64
+ARCHS ?= arm64-v8a armeabi-v7a
 ARCH ?= arm64-v8a
 
-VER_NAME ?= v1.0.0
+VER_NAME ?= v2.0.0
 VER_CODE ?= $(shell git -C "$(ROOT_DIR)" rev-list HEAD --count 2>/dev/null || echo 1)
 COMMIT_HASH ?= $(shell git -C "$(ROOT_DIR)" rev-parse --verify --short HEAD 2>/dev/null || echo unknown)
 
@@ -34,8 +34,6 @@ BUILD_DIR ?= $(ROOT_DIR)/build
 
 TARGET_arm64-v8a = aarch64-linux-android$(API_LEVEL)
 TARGET_armeabi-v7a = armv7a-linux-androideabi$(API_LEVEL)
-TARGET_x86 = i686-linux-android$(API_LEVEL)
-TARGET_x86_64 = x86_64-linux-android$(API_LEVEL)
 
 CC_ARCH = $(CC) --target=$(TARGET_$(ARCH)) --sysroot=$(SYSROOT)
 

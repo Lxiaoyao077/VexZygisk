@@ -19,10 +19,7 @@
           "notInjected": "Non iniettato",
           "unknown": "Sconosciuto"
         }
-      }
-    },
-    "actions": {
-      "title": "Azioni",
+      },
       "monitor": {
         "title": "Monitor",
         "status": {
@@ -31,11 +28,6 @@
           "stopped": "Arrestato",
           "exiting": "Uscita",
           "unknown": "Sconosciuto"
-        },
-        "button": {
-          "start": "Inizio",
-          "stop": "Arresto",
-          "pause": "Pausa"
         }
       }
     },
@@ -43,41 +35,6 @@
       "title": "Moduli",
       "notAvaliable": "Nessun modulo che utilizza Zygisk qui.",
       "arch": "Architettura "
-    },
-    "settings": {
-      "title": "Impostazioni",
-      "language": {
-        "title": "Cambia il linguaggio della WebUI in quello selezionato",
-        "description": "Cambia il linguaggio della WebUI in quello selezionato."
-      },
-      "fullscreen": {
-        "title": "Disabilita la modalità a schermo intero in WebUI",
-        "description": "Questa opzione farà sì che l'interfaccia web non riempia tutta la schermata."
-      },
-      "theme": {
-        "title": "Modifica tema WebUI",
-        "description": "Scegli il tema di sistema per l'interfaccia web attuale"
-      },
-      "font": {
-        "title": "Abilita font di sistema",
-        "description": "Questa opzione abiliterà il font di sistema nell'interfaccia Web attuale. NOTA: Potrebbe non essere compatibile con FlipFont"
-      },
-      "moduleDevelopers": "Sviluppatore(i) moduli",
-      "WebUIDevelopers": "Sviluppatore(i) WebUI",
-      "orginalDevelopers": "Sviluppatore(i) originale del modulo",
-      "moduleLicense": "Licenza del Modulo"
-    },
-    "mini_settings_language": {
-      "title": "Cambia lingua"
-    },
-    "mini_settings_theme": {
-      "title": "Modifica tema WebUI",
-      "theme": {
-        "dark": "Tema scuro",
-        "light": "Tema chiaro",
-        "amoled": "Tema Amoled",
-        "system_based": "Tema basato sul sistema"
-      }
     }
   },
   "globals": {

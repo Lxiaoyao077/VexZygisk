@@ -1,7 +1,6 @@
 # shellcheck disable=SC2034
 SKIPUNZIP=1
 
-DEBUG=@DEBUG@
 MIN_KSU_VERSION=@MIN_KSU_VERSION@
 MIN_KSUD_VERSION=@MIN_KSUD_VERSION@
 
@@ -39,11 +38,15 @@ else
 fi
 
 # check architecture
-if [ "$ARCH" != "arm" ] && [ "$ARCH" != "arm64" ] && [ "$ARCH" != "x86" ] && [ "$ARCH" != "x64" ]; then
-  abort "! Unsupported platform: $ARCH"
-else
-  ui_print "- Device platform: $ARCH"
+if [ "$ARCH" = "x86" ] || [ "$ARCH" = "x64" ]; then
+  abort "! x86 / x86_64 devices are not supported by VexZygisk"
 fi
+
+if [ "$ARCH" != "arm" ] && [ "$ARCH" != "arm64" ]; then
+  abort "! Unsupported platform: $ARCH"
+fi
+
+ui_print "- Device platform: $ARCH"
 
 ui_print "- Extracting verify.sh"
 unzip -o "$ZIPFILE" 'verify.sh' -d "$TMPDIR" >&2
@@ -71,7 +74,6 @@ fi
 ui_print "- Extracting module files"
 extract "$ZIPFILE" 'module.prop'     "$MODPATH"
 extract "$ZIPFILE" 'post-fs-data.sh' "$MODPATH"
-extract "$ZIPFILE" 'service.sh'      "$MODPATH"
 extract "$ZIPFILE" 'uninstall.sh'    "$MODPATH"
 extract "$ZIPFILE" 'rezygisk.sh' "/data/adb/post-fs-data.d/"
 
@@ -99,25 +101,11 @@ mkdir "$MODPATH/webroot"
 ui_print "- Extracting webroot"
 unzip -o "$ZIPFILE" "webroot/*" -x "*.sha256" -d "$MODPATH"
 
-# INFO: Only the Zygote matching the device's primary ABI gets injected. Practically every
-#         modern device is 64-bit and ships a secondary 32-bit Zygote that barely sees any
-#         use, so injecting it only costs performance and stability for no real gain. The
-#         32-bit binaries are therefore installed on 32-bit only devices solely.
 case "$ARCH" in
-  x86)
-    ARCH_BITS=32
-    ARCH_LIB_DIR=lib
-    ARCH_ABI=x86
-    ;;
   arm)
     ARCH_BITS=32
     ARCH_LIB_DIR=lib
     ARCH_ABI=armeabi-v7a
-    ;;
-  x64)
-    ARCH_BITS=64
-    ARCH_LIB_DIR=lib64
-    ARCH_ABI=x86_64
     ;;
   *)
     ARCH_BITS=64

@@ -37,10 +37,6 @@ struct Context {
   #define ARCH_STR "arm64-v8a"
 #elif __arm__
   #define ARCH_STR "armeabi-v7a"
-#elif __x86_64__
-  #define ARCH_STR "x86_64"
-#elif __i386__
-  #define ARCH_STR "x86"
 #else
   #error "Unsupported architecture"
   #define ARCH_STR "unknown"
@@ -405,9 +401,8 @@ void zygiskd_start(char *restrict argv[]) {
         ssize_t ret = write_uint32_t(client_fd, flags);
         ASSURE_SIZE_WRITE("GetInfo", "flags", ret, sizeof(flags), break);
 
-        /* TODO: Use pid_t */
-        uint32_t pid = (uint32_t)getpid();
-        ret = write_uint32_t(client_fd, pid);
+        pid_t pid = getpid();
+        ret = write_uint32_t(client_fd, (uint32_t)pid);
         ASSURE_SIZE_WRITE("GetInfo", "pid", ret, sizeof(pid), break);
 
         size_t modules_count = context.len;

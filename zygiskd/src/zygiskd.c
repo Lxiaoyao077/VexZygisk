@@ -817,13 +817,7 @@ void zygiskd_start(char *restrict argv[]) {
           }
         }
 
-        switch (impl.impl) {
-          case KernelSU: {
-            flags |= PROCESS_ROOT_IS_KSU;
-
-            break;
-          }
-        }
+        flags |= PROCESS_ROOT_IS_KSU;
 
         ret = write_uint32_t(client_fd, flags);
         ASSURE_SIZE_WRITE("GetProcessFlags", "flags", ret, sizeof(flags), break);
@@ -833,13 +827,7 @@ void zygiskd_start(char *restrict argv[]) {
       case GetInfo: {
         uint32_t flags = 0;
 
-        switch (impl.impl) {
-          case KernelSU: {
-            flags |= PROCESS_ROOT_IS_KSU;
-
-            break;
-          }
-        }
+        flags |= PROCESS_ROOT_IS_KSU;
 
         ssize_t ret = write_uint32_t(client_fd, flags);
         ASSURE_SIZE_WRITE("GetInfo", "flags", ret, sizeof(flags), break);
@@ -1087,9 +1075,8 @@ void zygiskd_start(char *restrict argv[]) {
         ret = write_uint32_t(client_fd, our_pid);
         ASSURE_SIZE_WRITE("UpdateMountNamespace", "our_pid", ret, sizeof(our_pid), break);
 
-        if ((enum MountNamespaceState)mns_state == Clean)
-          save_mns_fd(pid, Mounted);
-
+        /* Only the requested namespace is handed back; the loader never asks
+           for the mounted one, so there is no reason to prime its cache here. */
         int ns_fd = save_mns_fd(pid, (enum MountNamespaceState)mns_state);
         if (ns_fd == -1) {
           LOGE("Failed to save mount namespace fd for pid %d: %s", pid, strerror(errno));

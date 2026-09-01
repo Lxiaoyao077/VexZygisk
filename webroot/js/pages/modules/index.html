@@ -1,10 +1,17 @@
-<div class="panel">
-  <div class="header">VexZygisk: {{title}} </div>
+<div class="page-scroller">
 
-  <div id="modules_list" style="width: 100%; height: fit-content; display: grid;">
-    <div id="modules_list_not_avaliable" class="not_avaliable">
-      {{notAvaliable}}
+  <div class="header-section">
+    <div class="search-bar">
+      <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+      <input class="search-input" id="module_search" placeholder="{{searchPlaceholder}}">
     </div>
-    <!-- N/A -->
   </div>
+
+  <div class="modules-list" id="modules_list">
+    <div class="empty-state" id="modules_list_empty" style="display: none;">
+      <div class="empty-title">{{notAvaliable}}</div>
+      <div class="empty-sub">Zygisk / Zygisk Next</div>
+    </div>
+  </div>
+
 </div>

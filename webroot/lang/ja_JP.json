@@ -34,7 +34,13 @@
     "modules": {
       "title": "モジュール",
       "notAvaliable": "Zygisk を使用するモジュールはありません。",
-      "arch": "アーキテクチャ: "
+      "arch": "アーキテクチャ: ",
+      "active": "Zygisk",
+      "searchPlaceholder": "搜索模块...",
+      "noResults": "无匹配模块",
+      "modeNext": "Next",
+      "modeCompanion": "Companion",
+      "targets": "Target"
     }
   },
   "globals": {

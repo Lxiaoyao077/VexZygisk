@@ -4,18 +4,44 @@ import { whichCurrentPage } from '../navbar.js'
 import { getStrings } from '../pageLoader.js'
 import { getVexZygiskState } from '../state.js'
 
-let rzState = {
+const rzState = {
   actuallyWorking: 0,
   expectedWorking: 0
 }
 
-async function _getVersion() {
-  let moduleProp = await exec('cat /data/adb/modules/rezygisk/module.prop')
-  if (moduleProp.errno !== 0) {
-    toast('Error getting state of VexZygisk!')
-
-    return;
+function setZygoteMetric(el, state, strings) {
+  if (!el) return
+  if (state === 1) {
+    el.textContent = strings.info.zygote.injected
+  } else if (state === 0) {
+    el.textContent = strings.info.zygote.notInjected
+  } else {
+    el.textContent = strings.info.zygote.unknown
   }
+}
+
+function setMonitorPill(state, strings) {
+  const pill = document.getElementById('monitor_pill')
+  if (!pill) return
+
+  const status = strings.monitor?.status ?? {}
+  let text
+  switch (state) {
+    case '0': text = status.tracing; break
+    case '1': text = status.stopping; break
+    case '2': text = status.stopped; break
+    case '3': text = status.exiting; break
+    default: text = status.unknown ?? strings.unknown
+  }
+
+  pill.textContent = text
+  pill.classList.remove('zygisk', 'next', 'companion')
+  pill.classList.add(state === '0' ? 'zygisk' : 'companion')
+}
+
+async function _getVersion() {
+  const moduleProp = await exec('cat /data/adb/modules/rezygisk/module.prop')
+  if (moduleProp.errno !== 0) return '???'
 
   let version = '???'
   moduleProp.stdout.split('\n').forEach((line) => {
@@ -27,130 +53,51 @@ async function _getVersion() {
 
 async function _getKernelString() {
   const unameCmd = await exec('/system/bin/uname -r')
-  if (unameCmd.errno !== 0) {
-    toast('Error getting kernel version!')
-    return '???'
-  }
-
-  if (unameCmd.stdout && unameCmd.stdout.length !== 0) {
-    return unameCmd.stdout.trim()
-  } else {
-    return '???'
-  }
+  if (unameCmd.errno !== 0 || !unameCmd.stdout) return '???'
+  return unameCmd.stdout.trim()
 }
 
 async function _getAndroidVersion() {
   const androidVersionCmd = await exec('/system/bin/getprop ro.build.version.release')
-  if (androidVersionCmd.errno !== 0) {
-    toast('Error getting android version!')
-    return '???'
-  }
-
-  if (androidVersionCmd.stdout && androidVersionCmd.stdout.length !== 0) {
-    return androidVersionCmd.stdout
-  } else {
-    return '???'
-  }
+  if (androidVersionCmd.errno !== 0 || !androidVersionCmd.stdout) return '???'
+  return androidVersionCmd.stdout.trim()
 }
 
-function _getMonitorStatus(VexZygiskState, strings) {
-  const status = strings.monitor?.status ?? {}
-
-  switch (VexZygiskState?.monitor?.state) {
-    case '0': return status.tracing
-    case '1': return status.stopping
-    case '2': return status.stopped
-    case '3': return status.exiting
-    default: return status.unknown ?? strings.unknown
-  }
-}
-
-async function _updateDynamicElement(firstRun, VexZygiskState, strings) {
-  const rootCss = document.querySelector(':root')
+function _updateDynamicElement(firstRun, VexZygiskState, strings) {
   const rz_state = document.getElementById('rz_state')
-  const rz_icon_state = document.getElementById('rz_icon_state')
-
-  const zygote_divs = [
-    document.getElementById('zygote64'),
-    document.getElementById('zygote32')
-  ]
-
-  const zygote_status_divs = [
-    document.getElementById('zygote64_status'),
-    document.getElementById('zygote32_status')
-  ]
-
-  /* INFO: Just ensure that they won't appear unless there's info */
-  zygote_divs.forEach((zygote_div) => {
-    zygote_div.style.display = 'none'
-  })
 
   if (VexZygiskState == null) {
-    rz_state.innerHTML = strings.unknown
-    rz_icon_state.innerHTML = '<img class="brightc" src="assets/mark.svg">'
-    document.getElementById('zygote_class').style.display = 'none'
-    /* INFO: This hides the throbber screen */
+    if (rz_state) rz_state.textContent = strings.unknown
     document.getElementById('loading_screen').style.display = 'none'
-    return;
+    return
   }
 
   if (firstRun) {
-    rzState.expectedWorking = VexZygiskState.zygote === undefined ? 0 : (VexZygiskState.zygote['64'] !== undefined ? 1 : 0) + (VexZygiskState.zygote['32'] !== undefined ? 1 : 0)
+    rzState.expectedWorking =
+      VexZygiskState.zygote === undefined
+        ? 0
+        : (VexZygiskState.zygote['64'] !== undefined ? 1 : 0) +
+          (VexZygiskState.zygote['32'] !== undefined ? 1 : 0)
   }
 
   if (VexZygiskState.zygote !== undefined && VexZygiskState.zygote['64'] !== undefined) {
-    const zygote64 = VexZygiskState.zygote['64']
-
-    zygote_divs[0].style.display = 'block'
-
-    switch (zygote64) {
-      case 1: {
-        zygote_status_divs[0].innerHTML = strings.info.zygote.injected
-
-        if (firstRun) rzState.actuallyWorking++
-
-        break
-      }
-      case 0: zygote_status_divs[0].innerHTML = strings.info.zygote.notInjected; break
-      default: zygote_status_divs[0].innerHTML = strings.info.zygote.unknown
-    }
+    if (VexZygiskState.zygote['64'] === 1 && firstRun) rzState.actuallyWorking++
+    setZygoteMetric(document.getElementById('zygote64_state'), VexZygiskState.zygote['64'], strings)
   }
 
   if (VexZygiskState.zygote && VexZygiskState.zygote['32'] !== undefined) {
-    const zygote32 = VexZygiskState.zygote['32']
+    if (VexZygiskState.zygote['32'] === 1 && firstRun) rzState.actuallyWorking++
+    setZygoteMetric(document.getElementById('zygote32_state'), VexZygiskState.zygote['32'], strings)
+  }
 
-    zygote_divs[1].style.display = 'block'
-
-    switch (zygote32) {
-      case 1: {
-        zygote_status_divs[1].innerHTML = strings.info.zygote.injected
-
-        if (firstRun) rzState.actuallyWorking++
-
-        break
-      }
-      case 0: zygote_status_divs[1].innerHTML = strings.info.zygote.notInjected; break
-      default: zygote_status_divs[1].innerHTML = strings.info.zygote.unknown
+  if (rz_state) {
+    if (rzState.expectedWorking === 0 || rzState.actuallyWorking === 0) {
+      rz_state.textContent = strings.status.notWorking
+    } else if (rzState.expectedWorking === rzState.actuallyWorking) {
+      rz_state.textContent = strings.status.ok
+    } else {
+      rz_state.textContent = strings.status.partially
     }
-  }
-
-  if (rzState.expectedWorking === 0 || rzState.actuallyWorking === 0) {
-    rz_state.innerHTML = strings.status.notWorking
-    document.getElementById('zygote_class').style.display = 'none'
-  } else if (rzState.expectedWorking === rzState.actuallyWorking) {
-    rz_state.innerHTML = strings.status.ok
-
-    rootCss.style.setProperty('--bright', '#545454')
-    rz_icon_state.innerHTML = '<img class="brightc" src="assets/tick.svg">'
-  } else {
-    rz_state.innerHTML = strings.status.partially
-
-    rootCss.style.setProperty('--bright', '#766000')
-    rz_icon_state.innerHTML = '<img class="brightc" src="assets/warn.svg">'
-  }
-
-  if (VexZygiskState.zygote === undefined) {
-    document.getElementById('zygote_class').style.display = 'none'
   }
 }
 
@@ -160,7 +107,6 @@ export async function loadOnce() {
 
 export async function loadOnceView() {
   document.getElementById('version_code').innerHTML = await _getVersion()
-
   document.getElementById('kernel_version_div').innerHTML = await _getKernelString()
   document.getElementById('android_version_div').innerHTML = await _getAndroidVersion()
 
@@ -169,14 +115,12 @@ export async function loadOnceView() {
 
   if (VexZygiskState === null) toast('Error getting state of VexZygisk!')
 
-  let root_impl = VexZygiskState ? VexZygiskState.root : null
-  if (!root_impl) root_impl = strings.unknown
-
+  const root_impl = VexZygiskState?.root ?? strings.unknown
   document.getElementById('root_impl').innerHTML = root_impl
 
   _updateDynamicElement(true, VexZygiskState, strings)
+  setMonitorPill(VexZygiskState?.monitor?.state, strings)
 
-  /* INFO: This hides the throbber screen */
   document.getElementById('loading_screen').style.display = 'none'
 }
 
@@ -184,5 +128,10 @@ export async function load() {
   const VexZygiskState = await getVexZygiskState()
   const strings = await getStrings(whichCurrentPage())
 
-  document.getElementById('monitor_status').innerHTML = _getMonitorStatus(VexZygiskState, strings)
+  document.getElementById('monitor_status').innerHTML =
+    VexZygiskState?.monitor?.state === undefined
+      ? strings.unknown
+      : (strings.monitor?.status ?? {})[VexZygiskState.monitor.state] ?? strings.unknown
+
+  setMonitorPill(VexZygiskState?.monitor?.state, strings)
 }

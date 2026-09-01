@@ -1,62 +1,71 @@
-<div class="panel">
-  <div class="header">VexZygisk</div>
+<div class="page-scroller">
 
-  <!-- INFO: Status card -->
-  <div id="info_card" class="bright card list">
-    <div class="brightc" style="display: flex; align-items: center;">
-      <div id="rz_icon_state" class="brightc" style="display: flex; align-items: center;">
-        <img class="brightc" src="assets/mark.svg">
+  <!-- INFO: Hero status card -->
+  <div class="hero-card">
+    <div class="hero-content">
+      <div class="hero-label">VexZygisk</div>
+      <div class="hero-value" id="rz_state">{{unknown}}</div>
+    </div>
+    <div class="hero-badges">
+      <span class="mode-indicator" id="monitor_pill">{{unknown}}</span>
+    </div>
+  </div>
+
+  <!-- INFO: Zygote metrics -->
+  <div class="metrics-row">
+    <div class="metric-card">
+      <div class="metric-icon-bg">
+        <svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 1 5 5v4a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5zM4 11a1 1 0 0 1 1 1 7 7 0 0 0 14 0 1 1 0 0 1 2 0 9 9 0 0 1-8 8.94V23a1 1 0 0 1-2 0v-2.06A9 9 0 0 1 3 12a1 1 0 0 1 1-1z"/></svg>
       </div>
+      <div class="metric-value" id="zygote64_state">{{unknown}}</div>
+      <div class="metric-label">Zygote 64</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-icon-bg">
+        <svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 1 5 5v4a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5zM4 11a1 1 0 0 1 1 1 7 7 0 0 0 14 0 1 1 0 0 1 2 0 9 9 0 0 1-8 8.94V23a1 1 0 0 1-2 0v-2.06A9 9 0 0 1 3 12a1 1 0 0 1 1-1z"/></svg>
+      </div>
+      <div class="metric-value" id="zygote32_state">{{unknown}}</div>
+      <div class="metric-label">Zygote 32</div>
+    </div>
+  </div>
 
-      <div id="rz_state" class="brightc lock" style="font-size: 1.2em; padding-left: 15px;">
-        {{unknown}}
+  <!-- INFO: System / Root info -->
+  <div class="info-card">
+    <div class="card-title">{{androidVersion}} / Kernel</div>
+    <div class="info-row">
+      <div>
+        <div class="info-label">{{androidVersion}}</div>
+        <div class="info-sub" id="android_version_div">{{unknown}}</div>
+      </div>
+    </div>
+    <div class="info-row">
+      <div>
+        <div class="info-label">{{linuxKernelVersion}}</div>
+        <div class="info-sub" id="kernel_version_div">{{unknown}}</div>
       </div>
     </div>
   </div>
 
-  <!-- INFO: Info card -->
-  <div class="dim card">
-    <div class="dimc" style="margin-bottom: 14px;">
-      <div class="dimc" style="font-size: 0.8em">ROM / Kernel</div>
+  <div class="info-card">
+    <div class="card-title">Root / VexZygisk</div>
+    <div class="info-row">
+      <div>
+        <div class="info-label">{{info.version}}</div>
+      </div>
+      <div class="info-value" id="version_code">{{unknown}}</div>
     </div>
-
-    <div id="android_version" class="dimc">
-      <div class="dimc" style="font-size: 17px">{{androidVersion}}</div>
-      <div class="dimc desc" id="android_version_div" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
+    <div class="info-row">
+      <div>
+        <div class="info-label">{{info.root}}</div>
+      </div>
+      <div class="info-value" id="root_impl">{{unknown}}</div>
     </div>
-    <div id="kernel_version" class="dimc" style="margin-top: 5px;">
-      <div class="dimc" style="font-size: 17px">{{linuxKernelVersion}}</div>
-      <div class="dimc desc" id="kernel_version_div" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-
-    <div class="dimc" style="margin-top: 18px; margin-bottom: 14px;">
-      <div class="dimc" style="font-size: 0.8em;">Root / VexZygisk</div>
-    </div>
-
-    <div class="dimc content">
-      <div class="dimc" style="font-size: 17px">{{info.version}}</div>
-      <div class="dimc desc" id="version_code" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-    <div class="dimc content">
-      <div class="dimc" style="font-size: 17px">{{info.root}}</div>
-      <div class="dimc desc" id="root_impl" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-    <div class="dimc content" style="margin-top: 5px;">
-      <div class="dimc" style="font-size: 17px">{{monitor.title}}</div>
-      <div class="dimc desc" id="monitor_status" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-
-    <div id="zygote_class" class="dimc" style="margin-top: 12px; margin-bottom: 14px;">
-      <div class="dimc" style="font-size: 0.8em">Zygotes</div>
-    </div>
-
-    <div id="zygote32" class="dimc content">
-      <div class="dimc" style="font-size: 17px">Zygote32</div>
-      <div class="dimc desc" id="zygote32_status" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
-    </div>
-    <div id="zygote64" class="dimc">
-      <div class="dimc" style="font-size: 17px">Zygote64</div>
-      <div class="dimc desc" id="zygote64_status" style="font-size: 13px; margin-top: 1px;">{{unknown}}</div>
+    <div class="info-row">
+      <div>
+        <div class="info-label">{{monitor.title}}</div>
+        <div class="info-sub" id="monitor_status">{{unknown}}</div>
+      </div>
     </div>
   </div>
+
 </div>

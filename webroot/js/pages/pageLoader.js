@@ -1,6 +1,6 @@
 import { exec, toast } from '../kernelsu.js'
 
-import { loadNavbar, setNavbar, whichCurrentPage } from './navbar.js'
+import { loadNavbar, setNavbar } from './navbar.js'
 import { runMainPageTransition } from './animator.js'
 
 const head = document.getElementsByTagName('head')[0]
@@ -344,6 +344,12 @@ export async function loadPage(pageId) {
     /* INFO: Keep transition errors visible without breaking future navigation attempts. */
     console.error('Page transition failed:', error)
     toast('Error while changing page.')
+
+    /* INFO: If the page's own loadOnceView never ran (or crashed before it
+             could), the loading screen stays up forever and the UI looks
+             stuck. Force-hide it so the user at least sees the error toast. */
+    const loadingScreen = document.getElementById('loading_screen')
+    if (loadingScreen) loadingScreen.style.display = 'none'
 
     return false
   } finally {

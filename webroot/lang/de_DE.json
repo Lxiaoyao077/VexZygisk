@@ -34,7 +34,13 @@
     "modules": {
       "title": "Module",
       "notAvaliable": "Keine Zygisk-Module hier ...",
-      "arch": "Architektur: "
+      "arch": "Architektur: ",
+      "active": "Zygisk",
+      "searchPlaceholder": "搜索模块...",
+      "noResults": "无匹配模块",
+      "modeNext": "Next",
+      "modeCompanion": "Companion",
+      "targets": "Target"
     }
   },
   "globals": {

@@ -10,16 +10,14 @@ const developmentResponse = {
         "rezygiskd": {
           "64": {
             "state": 1,
-            "modules": ["immense_cool", "rezygisk_module"]
-          },
-          "32": {
-            "state": 1,
-            "modules": ["immense_cool", "rezygisk_module"]
+            "modules": [
+              { "id": "immense_cool", "next": false },
+              { "id": "rezygisk_module", "next": true }
+            ]
           }
         },
         "zygote": {
-          "64": 1,
-          "32": 1
+          "64": 1
         }
       }
     `,

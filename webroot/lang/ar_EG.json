@@ -34,7 +34,13 @@
     "modules": {
       "title": "الوحدات",
       "notAvaliable": "لا توجد وحدات تستخدم Zygisk.",
-      "arch": "المعمارية:"
+      "arch": "المعمارية:",
+      "active": "Zygisk",
+      "searchPlaceholder": "搜索模块...",
+      "noResults": "无匹配模块",
+      "modeNext": "Next",
+      "modeCompanion": "Companion",
+      "targets": "Target"
     }
   },
   "globals": {

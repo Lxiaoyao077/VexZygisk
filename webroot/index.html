@@ -1,62 +1,51 @@
 <!DOCTYPE html>
-<html id="main_html" lang="en" dir="none">
-  <head>
-    <meta name="viewport" content="initial-scale=1, width=device-width" />
-    <meta name="viewport" content="viewport-fit=cover" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>VexZygisk</title>
+  <link rel="stylesheet" href="index.css">
+  <link rel="stylesheet" href="css/icons.css">
+</head>
+<body>
 
-    <link rel="stylesheet" type="text/css" href="https://mui.kernelsu.org/internal/insets.css">
+  <div id="loading_screen">
+    <div class="loader-ring"></div>
+  </div>
 
-    <link rel="stylesheet" href="fonts/header.css">
-    <link rel="stylesheet" href="index.css">
-    <link rel="stylesheet" href="css/index.css">
-    <link rel="stylesheet" href="css/icons.css">
+  <div class="app-root">
 
-    <script src="js/pages/pageLoader.js" type="module"></script>
-    <script src="js/preloader.js" type="module"></script>
-  </head>
-  <body id="main_body">
-    <!-- INFO: Loading screen -->
-    <div id="loading_screen">
-      <div id="backport_errorh" class="loader"></div>
-    </div>
-
-    <div id="page_content">
-      <!-- INFO: Dynamically replaced -->
-    </div>
-
-    <!-- INFO: Bottom navbar -->
-    <div id="navbar_support_div">
-      <div id="navbar" class="radios">
-        <div class="navicon_support nav_dimc">
-          <input id="n_home" type="radio" name="navbutton" value="home"/>
-          <label class="radio nav_dimc" for="n_home">
-
-            <div class="navicon_support nav_dimc" style="display: grid; place-items: center;">
-              <div class="navicon_support nav_dimc" style="display: grid; place-items: center; width: 65px;">
-                <div style="grid-area: 1 / 1;" id="ni_home"></div>
-                <div style="grid-area: 1 / 1;" id="nibg_home" class="navicon"></div>
-              </div>
-              <div id="nav_home_title" class="navtitle nav_dimc">Home</div>
-            </div>
-          </label>
-        </div>
-
-        <div class="navicon_support nav_dimc">
-          <input id="n_modules" type="radio" name="navbutton" value="modules"/>
-          <label class="radio nav_dimc" for="n_modules">
-
-            <div class="navicon_support nav_dimc" style="display: grid; place-items: center;">
-              <div class="navicon_support nav_dimc" style="display: grid; place-items: center; width: 65px;">
-                <div style="grid-area: 1 / 1;" id="ni_modules"></div>
-                <div style="grid-area: 1 / 1;" id="nibg_modules" class="navicon"></div>
-              </div>
-              <div id="nav_modules_title" class="navtitle nav_dimc">Modules</div>
-            </div>
-          </label>
-        </div>
-
+    <!-- INFO: Top bar -->
+    <header class="top-bar">
+      <div class="top-bar-content">
+        <h1 class="screen-title" id="screen_title">VexZygisk</h1>
+        <div class="top-actions"></div>
       </div>
-    </div>
-  </body>
+    </header>
+
+    <!-- INFO: Page content (fragments injected here by pageLoader) -->
+    <main class="main-content" id="page_content"></main>
+
+    <!-- INFO: M3 navigation bar -->
+    <nav class="bottom-nav">
+      <button class="nav-tab active" data-page="home">
+        <div class="icon-container">
+          <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        </div>
+        <div class="label" id="nav_home_title">主页</div>
+      </button>
+      <button class="nav-tab" data-page="modules">
+        <div class="icon-container">
+          <svg viewBox="0 0 24 24"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>
+        </div>
+        <div class="label" id="nav_modules_title">模块</div>
+      </button>
+    </nav>
+
+  </div>
+
+  <script type="module" src="js/preloader.js"></script>
+  <script type="module" src="js/pages/pageLoader.js"></script>
+
+</body>
 </html>

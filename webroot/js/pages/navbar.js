@@ -1,37 +1,32 @@
 import { loadPage, allPages } from './pageLoader.js'
 
+/* INFO: M3 navigation bar: active tab gets the .active class, which widens the
+         icon container into a secondary-container pill.
+
+         loadNavbar only wires up the click handlers; the active state is set
+         later by loadPage('home') -> setNavbar('home'). Setting it here would
+         make whichCurrentPage() return 'home' before loadPage runs, so
+         loadPage('home') would short-circuit as "already on home" and never
+         initialize the page, leaving the loading screen up forever. */
 export function loadNavbar() {
-  document.getElementById('nibg_home').classList.add('show')
+  document.querySelectorAll('.nav-tab').forEach((tab) => {
+    tab.addEventListener('click', async (event) => {
+      event.preventDefault()
+      await loadPage(tab.dataset.page)
+    })
+  })
+}
+
+function setActive(page) {
+  allPages.forEach((p) => {
+    document.querySelector(`.nav-tab[data-page="${p}"]`)?.classList.toggle('active', p === page)
+  })
 }
 
 export function setNavbar(page) {
-  allPages.forEach((page) => {
-    document.getElementById(`n_${page}`).removeAttribute('checked')
-    document.getElementById(`nibg_${page}`).classList.remove('show')
-    document.getElementById(`ni_${page}`).style.background = ''
-  })
-
-  document.getElementById(`n_${page}`).setAttribute('checked', '')
-  document.getElementById(`nibg_${page}`).classList.add('show')
-  document.getElementById(`ni_${page}`).style.background = `url(./assets/${page}/filled.svg)`
+  setActive(page)
 }
 
 export function whichCurrentPage() {
-  for (const page of allPages) {
-    if (document.getElementById(`n_${page}`).hasAttribute('checked')) return page
-  }
-
-  return null
+  return allPages.find((page) => document.querySelector(`.nav-tab[data-page="${page}"]`)?.classList.contains('active')) ?? null
 }
-
-document.querySelectorAll('[name=navbutton]').forEach((element) => {
-  element.addEventListener('click', async (event) => {
-    /* INFO: Keep radio state controlled by page loader to avoid UI desync under rapid taps. */
-    event.preventDefault()
-
-    const value = event.target.value
-
-    /* INFO: Wait for page loader so fast clicks cannot race navbar state updates. */
-    await loadPage(value)
-  })
-})

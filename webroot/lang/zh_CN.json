@@ -33,8 +33,14 @@
     },
     "modules": {
       "title": "模块",
-      "notAvaliable": "目前没有模块使用 Zygisk",
-      "arch": "架构: "
+      "notAvaliable": "暂无 Zygisk 模块",
+      "arch": "架构：",
+      "active": "Zygisk",
+      "searchPlaceholder": "搜索模块...",
+      "noResults": "无匹配模块",
+      "modeNext": "Next",
+      "modeCompanion": "Companion",
+      "targets": "Target"
     }
   },
   "globals": {

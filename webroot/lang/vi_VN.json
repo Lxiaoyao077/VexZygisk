@@ -34,7 +34,13 @@
     "modules": {
       "title": "Mô Đun",
       "notAvaliable": "Không có mô-đun nào sử dụng Zygisk ở đây!",
-      "arch": "Kiến trúc: "
+      "arch": "Kiến trúc: ",
+      "active": "Zygisk",
+      "searchPlaceholder": "搜索模块...",
+      "noResults": "无匹配模块",
+      "modeNext": "Next",
+      "modeCompanion": "Companion",
+      "targets": "Target"
     }
   },
   "globals": {

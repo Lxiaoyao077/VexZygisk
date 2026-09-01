@@ -183,6 +183,10 @@ static bool add_zn_module(struct Context *restrict context, const char *name) {
   return true;
 }
 
+/* INFO: Declared here because load_modules bails out through it, and it is
+         defined further down where the rest of the context handling lives. */
+static void free_modules(struct Context *restrict context);
+
 /* WARNING: Dynamic memory based */
 static void load_modules(struct Context *restrict context) {
   context->len = 0;

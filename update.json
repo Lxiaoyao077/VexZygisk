@@ -1,6 +1,6 @@
 {
-  "version": "v2.1.0",
-  "versionCode": 580,
-  "zipUrl": "https://github.com/Lxiaoyao077/VexZygisk/releases/download/v2.1.0/VexZygisk-v2.1.0-580-4dd9e51-release.zip",
-  "changelog": "VexZygisk v2.1.0\n\n- Zygisk Next support: modules written against the Zygisk Next API (recent LSPosed builds among them) can load, with per-target resolution and optional companions\n- Module libraries travel as memfds, so unprivileged targets can load them without touching the modules' own mode and SELinux label\n- Zygisk and Zygisk Next modules are served side by side, matching NyaZygisk\n- Material 3 WebUI redesign of the home and modules pages\n- Module list now shows the companion flag and per-module targets\n- Fixed the startup spinner getting stuck on the M3 loader and a file-descriptor leak in GetModuleDir"
+  "version": "v2.1.1",
+  "versionCode": 586,
+  "zipUrl": "https://github.com/Lxiaoyao077/VexZygisk/releases/download/v2.1.1/VexZygisk-v2.1.1-586-d1ac0e6-release.zip",
+  "changelog": "VexZygisk v2.1.1\n\n- Removed the WebUI; module status is now shown through the module action (tap the module's action in the KernelSU manager)\n- Zygisk Next companion spawner deduplicated into a single exec_companion\n- Fixed modules being silently skipped on filesystems that report DT_UNKNOWN (fuse, some overlays)\n- Daemon no longer exits on a transient accept() error\n- Dropped an unused symbol and cleared stale comments"
 }

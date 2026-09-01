@@ -5,7 +5,10 @@ ARCHS ?= arm64-v8a armeabi-v7a
 ARCH ?= arm64-v8a
 
 VER_NAME ?= v2.0.0
-VER_CODE ?= $(shell git -C "$(ROOT_DIR)" rev-list HEAD --count 2>/dev/null || echo 1)
+# VER_CODE = commit count + 36: 36 commits were squashed away on 2026-09-01,
+# the last pre-squash build was 578, so the sequence continues from there.
+GIT_COUNT ?= $(shell git -C "$(ROOT_DIR)" rev-list HEAD --count 2>/dev/null || echo 542)
+VER_CODE ?= $(shell expr $(GIT_COUNT) + 36)
 COMMIT_HASH ?= $(shell git -C "$(ROOT_DIR)" rev-parse --verify --short HEAD 2>/dev/null || echo unknown)
 
 MIN_KSU_VERSION ?= 10940

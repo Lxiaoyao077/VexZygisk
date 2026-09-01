@@ -72,6 +72,11 @@ int unix_listener_from_path(const char *path);
 ssize_t write_fd(int fd, int sendfd);
 int read_fd(int fd);
 
+int create_library_fd(const char *restrict path);
+
+ssize_t write_loop(int fd, const void *restrict buf, size_t count);
+ssize_t read_loop(int fd, void *restrict buf, size_t count);
+
 write_func_def(size_t);
 read_func_def(size_t);
 

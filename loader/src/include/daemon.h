@@ -5,6 +5,7 @@
 
 #include <unistd.h>
 
+/* INFO: Must stay in step with enum DaemonSocketAction on the daemon. */
 enum rezygiskd_actions {
   ZygoteInjected,
   GetProcessFlags,
@@ -14,12 +15,23 @@ enum rezygiskd_actions {
   GetModuleDir,
   ZygoteRestart,
   UpdateMountNamespace,
-  RemoveModule
+  RemoveModule,
+  ReadZnModules,
+  SpawnZnCompanion
 };
 
 struct zygisk_modules {
   char **modules;
   size_t modules_count;
+};
+
+/* INFO: A Zygisk Next library as handed over by the daemon: the path it was
+         resolved from, whether the module asked for a companion, and the fd of
+         the already opened file. */
+struct zn_module_file {
+  char *lib_path;
+  bool companion;
+  int fd;
 };
 
 enum root_impl {
@@ -55,6 +67,17 @@ void free_rezygisk_info(struct rezygisk_info *info);
 bool rezygiskd_read_modules(struct zygisk_modules *modules);
 
 void free_modules(struct zygisk_modules *modules);
+
+/* INFO: Asks the daemon for the Zygisk Next libraries targeting this process.
+         Returns false when the daemon cannot be reached, which is the signal to
+         fall back to reading the modules directly. */
+bool rezygiskd_read_zn_modules(const char *process_name, const char *process_path, struct zn_module_file **out, size_t *out_len);
+
+void free_zn_module_files(struct zn_module_file *files, size_t len);
+
+/* INFO: Has the daemon spawn a companion for this library and returns its
+         control socket, or -1 when it is unavailable. */
+int rezygiskd_spawn_zn_companion(const char *lib_path);
 
 int rezygiskd_connect_companion(size_t index);
 

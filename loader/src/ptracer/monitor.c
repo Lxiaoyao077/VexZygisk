@@ -41,6 +41,10 @@ const char *monitor_stop_reason = NULL;
 struct environment_information {
   char *root_impl;
   char **modules;
+  bool *modules_zn;
+  bool *modules_companion;
+  char ***modules_targets;
+  uint32_t *modules_targets_len;
   uint32_t modules_len;
 };
 
@@ -276,10 +280,30 @@ void rezygiskd_listener_callback() {
 
           for (size_t i = 0; i < environment_information.modules_len; i++) {
             free((void *)environment_information.modules[i]);
+
+            if (environment_information.modules_targets && environment_information.modules_targets[i]) {
+              for (uint32_t t = 0; t < environment_information.modules_targets_len[i]; t++) {
+                free(environment_information.modules_targets[i][t]);
+              }
+
+              free(environment_information.modules_targets[i]);
+            }
           }
 
           free((void *)environment_information.modules);
           environment_information.modules = NULL;
+
+          free((void *)environment_information.modules_zn);
+          environment_information.modules_zn = NULL;
+
+          free((void *)environment_information.modules_companion);
+          environment_information.modules_companion = NULL;
+
+          free((void *)environment_information.modules_targets);
+          environment_information.modules_targets = NULL;
+
+          free((void *)environment_information.modules_targets_len);
+          environment_information.modules_targets_len = NULL;
         }
 
         environment_information.modules = malloc(environment_information.modules_len * sizeof(char *));
@@ -292,7 +316,80 @@ void rezygiskd_listener_callback() {
           break;
         }
 
+        environment_information.modules_zn = malloc(environment_information.modules_len * sizeof(bool));
+        if (environment_information.modules_zn == NULL) {
+          PLOGE("malloc VexZygiskd%s modules type", MONITOR_ABI);
+
+          free((void *)environment_information.root_impl);
+          environment_information.root_impl = NULL;
+
+          free((void *)environment_information.modules);
+          environment_information.modules = NULL;
+
+          break;
+        }
+
+        environment_information.modules_companion = malloc(environment_information.modules_len * sizeof(bool));
+        if (environment_information.modules_companion == NULL) {
+          PLOGE("malloc VexZygiskd%s modules companion", MONITOR_ABI);
+
+          free((void *)environment_information.root_impl);
+          environment_information.root_impl = NULL;
+
+          free((void *)environment_information.modules);
+          environment_information.modules = NULL;
+
+          free((void *)environment_information.modules_zn);
+          environment_information.modules_zn = NULL;
+
+          break;
+        }
+
+        environment_information.modules_targets = malloc(environment_information.modules_len * sizeof(char **));
+        if (environment_information.modules_targets == NULL) {
+          PLOGE("malloc VexZygiskd%s modules targets", MONITOR_ABI);
+
+          free((void *)environment_information.root_impl);
+          environment_information.root_impl = NULL;
+
+          free((void *)environment_information.modules);
+          environment_information.modules = NULL;
+
+          free((void *)environment_information.modules_zn);
+          environment_information.modules_zn = NULL;
+
+          free((void *)environment_information.modules_companion);
+          environment_information.modules_companion = NULL;
+
+          break;
+        }
+
+        environment_information.modules_targets_len = malloc(environment_information.modules_len * sizeof(uint32_t));
+        if (environment_information.modules_targets_len == NULL) {
+          PLOGE("malloc VexZygiskd%s modules targets len", MONITOR_ABI);
+
+          free((void *)environment_information.root_impl);
+          environment_information.root_impl = NULL;
+
+          free((void *)environment_information.modules);
+          environment_information.modules = NULL;
+
+          free((void *)environment_information.modules_zn);
+          environment_information.modules_zn = NULL;
+
+          free((void *)environment_information.modules_companion);
+          environment_information.modules_companion = NULL;
+
+          free((void *)environment_information.modules_targets);
+          environment_information.modules_targets = NULL;
+
+          break;
+        }
+
         for (size_t i = 0; i < environment_information.modules_len; i++) {
+          /* INFO: Kept null so the cleanup below can free the entry unconditionally */
+          environment_information.modules[i] = NULL;
+
           uint32_t module_name_len;
           if (read_uint32_t(monitor_sock_fd, &module_name_len) != sizeof(module_name_len)) {
             LOGE("read VexZygiskd%s module name len", MONITOR_ABI);
@@ -310,11 +407,92 @@ void rezygiskd_listener_callback() {
           if (read_loop(monitor_sock_fd, (void *)environment_information.modules[i], module_name_len) != (ssize_t)module_name_len) {
             LOGE("read VexZygiskd%s module name", MONITOR_ABI);
 
+            free((void *)environment_information.modules[i]);
+            environment_information.modules[i] = NULL;
+
             goto set_info_modules_cleanup;
           }
 
           environment_information.modules[i][module_name_len] = '\0';
-          LOGD("VexZygiskd%s module %zu: %s", MONITOR_ABI, i, environment_information.modules[i]);
+
+          uint8_t module_type;
+          if (read_uint8_t(monitor_sock_fd, &module_type) != sizeof(module_type)) {
+            LOGE("read VexZygiskd%s module type", MONITOR_ABI);
+
+            free((void *)environment_information.modules[i]);
+            environment_information.modules[i] = NULL;
+
+            goto set_info_modules_cleanup;
+          }
+
+          environment_information.modules_zn[i] = module_type == 1;
+          environment_information.modules_companion[i] = false;
+          environment_information.modules_targets[i] = NULL;
+          environment_information.modules_targets_len[i] = 0;
+
+          if (module_type == 1) {
+            uint8_t companion;
+            if (read_uint8_t(monitor_sock_fd, &companion) != sizeof(companion)) {
+              LOGE("read VexZygiskd%s module companion", MONITOR_ABI);
+
+              free((void *)environment_information.modules[i]);
+              environment_information.modules[i] = NULL;
+
+              goto set_info_modules_cleanup;
+            }
+            environment_information.modules_companion[i] = companion == 1;
+
+            uint32_t targets_len;
+            if (read_uint32_t(monitor_sock_fd, &targets_len) != sizeof(targets_len)) {
+              LOGE("read VexZygiskd%s module targets len", MONITOR_ABI);
+
+              free((void *)environment_information.modules[i]);
+              environment_information.modules[i] = NULL;
+
+              goto set_info_modules_cleanup;
+            }
+            environment_information.modules_targets_len[i] = targets_len;
+
+            if (targets_len > 0) {
+              environment_information.modules_targets[i] = malloc(targets_len * sizeof(char *));
+              if (environment_information.modules_targets[i] == NULL) {
+                PLOGE("malloc VexZygiskd%s module targets", MONITOR_ABI);
+
+                free((void *)environment_information.modules[i]);
+                environment_information.modules[i] = NULL;
+
+                goto set_info_modules_cleanup;
+              }
+
+              for (uint32_t t = 0; t < targets_len; t++) {
+                environment_information.modules_targets[i][t] = NULL;
+
+                uint32_t target_len;
+                if (read_uint32_t(monitor_sock_fd, &target_len) != sizeof(target_len)) {
+                  LOGE("read VexZygiskd%s module target len", MONITOR_ABI);
+
+                  goto set_info_modules_cleanup;
+                }
+
+                environment_information.modules_targets[i][t] = malloc(target_len + 1);
+                if (environment_information.modules_targets[i][t] == NULL) {
+                  PLOGE("malloc VexZygiskd%s module target", MONITOR_ABI);
+
+                  goto set_info_modules_cleanup;
+                }
+
+                if (read_loop(monitor_sock_fd, environment_information.modules_targets[i][t], target_len) != (ssize_t)target_len) {
+                  LOGE("read VexZygiskd%s module target", MONITOR_ABI);
+
+                  goto set_info_modules_cleanup;
+                }
+
+                environment_information.modules_targets[i][t][target_len] = '\0';
+              }
+            }
+          }
+
+          LOGD("VexZygiskd%s module %zu: %s (%s)", MONITOR_ABI, i, environment_information.modules[i], environment_information.modules_zn[i] ? "next" : "zygisk");
 
           continue;
 
@@ -322,12 +500,32 @@ void rezygiskd_listener_callback() {
             free((void *)environment_information.root_impl);
             environment_information.root_impl = NULL;
 
-            for (size_t j = 0; j < i; j++) {
+            for (size_t j = 0; j <= i; j++) {
               free((void *)environment_information.modules[j]);
+
+              if (environment_information.modules_targets && environment_information.modules_targets[j]) {
+                for (uint32_t t = 0; t < environment_information.modules_targets_len[j]; t++) {
+                  free(environment_information.modules_targets[j][t]);
+                }
+
+                free(environment_information.modules_targets[j]);
+              }
             }
 
             free((void *)environment_information.modules);
             environment_information.modules = NULL;
+
+            free((void *)environment_information.modules_zn);
+            environment_information.modules_zn = NULL;
+
+            free((void *)environment_information.modules_companion);
+            environment_information.modules_companion = NULL;
+
+            free((void *)environment_information.modules_targets);
+            environment_information.modules_targets = NULL;
+
+            free((void *)environment_information.modules_targets_len);
+            environment_information.modules_targets_len = NULL;
 
             break;
         }
@@ -866,7 +1064,21 @@ static bool update_status(const char *message) {
 
       if (environment_information.modules) for (uint32_t i = 0; i < environment_information.modules_len; i++) {
         if (i > 0) fprintf(json, ", ");
-        fprintf(json, "\"%s\"", environment_information.modules[i]);
+        fprintf(json, "{\"id\": \"%s\", \"next\": %s, \"companion\": %s",
+                environment_information.modules[i],
+                environment_information.modules_zn[i] ? "true" : "false",
+                environment_information.modules_companion[i] ? "true" : "false");
+
+        if (environment_information.modules_targets && environment_information.modules_targets[i]) {
+          fprintf(json, ", \"targets\": [");
+          for (uint32_t t = 0; t < environment_information.modules_targets_len[i]; t++) {
+            if (t > 0) fprintf(json, ", ");
+            fprintf(json, "\"%s\"", environment_information.modules_targets[i][t]);
+          }
+          fprintf(json, "]");
+        }
+
+        fprintf(json, "}");
       }
 
       fprintf(json, "]\n");
@@ -964,8 +1176,20 @@ void init_monitor() {
   if (environment_information.modules) {
     for (uint32_t i = 0; i < environment_information.modules_len; i++) {
       free((void *)environment_information.modules[i]);
+
+      if (environment_information.modules_targets && environment_information.modules_targets[i]) {
+        for (uint32_t t = 0; t < environment_information.modules_targets_len[i]; t++) {
+          free(environment_information.modules_targets[i][t]);
+        }
+
+        free(environment_information.modules_targets[i]);
+      }
     }
     free((void *)environment_information.modules);
+    free((void *)environment_information.modules_zn);
+    free((void *)environment_information.modules_companion);
+    free((void *)environment_information.modules_targets);
+    free((void *)environment_information.modules_targets_len);
   }
 
   LOGI("Terminating VexZygisk monitor");

@@ -14,6 +14,11 @@
 
 #define SOCKET_FILE_NAME LP_SELECT("cp32", "cp64") ".sock"
 
+/* INFO: The socket either accepts at once or is refused outright, so a full
+         second only stalls the injection of every process while the daemon is
+         down. This is still long enough to ride out a daemon restart. */
+#define REZYGISKD_RETRY_DELAY_US 100000
+
 static int rezygiskd_connect(uint8_t retry) {
   struct sockaddr_un addr = {
     .sun_family = AF_UNIX,
@@ -27,8 +32,7 @@ static int rezygiskd_connect(uint8_t retry) {
   */
   strcpy(addr.sun_path, TMP_PATH "/" SOCKET_FILE_NAME);
 
-  retry++;
-  while (--retry) {
+  for (uint8_t attempt = 0; attempt <= retry; attempt++) {
     int fd = socket(PF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd == -1) {
       PLOGE("socket");
@@ -36,18 +40,16 @@ static int rezygiskd_connect(uint8_t retry) {
       return -1;
     }
 
-    int ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    if (ret == -1) {
-      PLOGE("connect (retry: %d)", retry);
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != -1) return fd;
 
-      close(fd);
+    PLOGE("connect (attempt %d of %d)", attempt + 1, retry + 1);
 
-      if (!retry) return -1;
+    close(fd);
 
-      sleep(1);
-    }
+    /* INFO: Waiting is pointless once there is no attempt left to make. */
+    if (attempt == retry) break;
 
-    return fd;
+    usleep(REZYGISKD_RETRY_DELAY_US);
   }
 
   return -1;
@@ -265,6 +267,125 @@ void free_modules(struct zygisk_modules *modules) {
   free(modules->modules);
   modules->modules = NULL;
   modules->modules_count = 0;
+}
+
+bool rezygiskd_read_zn_modules(const char *process_name, const char *process_path, struct zn_module_file **out, size_t *out_len) {
+  *out = NULL;
+  *out_len = 0;
+
+  size_t filled = 0;
+
+  int fd = rezygiskd_connect(1);
+  if (fd == -1) return false;
+
+  safe_write(write_uint8_t(fd, (uint8_t)ReadZnModules), "ReadZnModules action", return false);
+  safe_write(write_string(fd, process_name), "process name", return false);
+  safe_write(write_string(fd, process_path), "process path", return false);
+
+  size_t len = 0;
+  safe_read(read_size_t(fd, &len), "Zygisk Next modules count", return false);
+
+  if (len == 0) {
+    close(fd);
+
+    *out = NULL;
+    *out_len = 0;
+
+    return true;
+  }
+
+  struct zn_module_file *files = calloc(len, sizeof(struct zn_module_file));
+  if (!files) {
+    PLOGE("allocating the Zygisk Next module list");
+
+    close(fd);
+
+    return false;
+  }
+
+  /* INFO: calloc leaves every descriptor at 0, which is a perfectly valid fd,
+           so they have to read as "not open" until one is really stored. */
+  for (size_t i = 0; i < len; i++) files[i].fd = -1;
+
+  for (size_t i = 0; i < len; i++) {
+    char *lib_path = read_string(fd);
+    if (!lib_path) {
+      PLOGE("reading a Zygisk Next module path");
+
+      goto cleanup;
+    }
+
+    uint8_t companion = 0;
+    if (read_uint8_t(fd, &companion) == -1) {
+      PLOGE("reading a Zygisk Next companion flag");
+
+      free(lib_path);
+
+      goto cleanup;
+    }
+
+    int module_fd = read_fd(fd);
+    if (module_fd == -1) {
+      PLOGE("reading a Zygisk Next module fd");
+
+      free(lib_path);
+
+      goto cleanup;
+    }
+
+    files[i].lib_path = lib_path;
+    files[i].companion = companion != 0;
+    files[i].fd = module_fd;
+
+    filled = i + 1;
+  }
+
+  close(fd);
+
+  *out = files;
+  *out_len = len;
+
+  return true;
+
+  cleanup:
+    /* INFO: Hand back nothing rather than a list that has already been freed. */
+    free_zn_module_files(files, filled);
+
+    close(fd);
+
+    return false;
+}
+
+void free_zn_module_files(struct zn_module_file *files, size_t len) {
+  for (size_t i = 0; i < len; i++) {
+    free(files[i].lib_path);
+    if (files[i].fd >= 0) close(files[i].fd);
+  }
+
+  free(files);
+}
+
+int rezygiskd_spawn_zn_companion(const char *lib_path) {
+  int fd = rezygiskd_connect(1);
+  if (fd == -1) return -1;
+
+  safe_write(write_uint8_t(fd, (uint8_t)SpawnZnCompanion), "SpawnZnCompanion action", return -1);
+  safe_write(write_string(fd, lib_path), "Zygisk Next library path", return -1);
+
+  uint8_t res = 0;
+  safe_read(read_uint8_t(fd, &res), "Zygisk Next companion result", return -1);
+
+  if (res != 1) {
+    close(fd);
+
+    return -1;
+  }
+
+  int companion_fd = read_fd(fd);
+
+  close(fd);
+
+  return companion_fd;
 }
 
 int rezygiskd_connect_companion(size_t index) {

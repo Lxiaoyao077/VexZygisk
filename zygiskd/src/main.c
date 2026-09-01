@@ -3,6 +3,7 @@
 
 #include "root_impl/common.h"
 #include "companion.h"
+#include "zn_companion.h"
 #include "zygiskd.h"
 
 #include "utils.h"
@@ -20,6 +21,19 @@ int main(int argc, char *argv[]) {
 
       int fd = atoi(argv[2]);
       companion_entry(fd);
+
+      return 0;
+    }
+
+    else if (strcmp(argv[1], "zn-companion") == 0) {
+      if (argc < 3) {
+        LOGI("Usage: zygiskd zn-companion <fd>");
+
+        return 1;
+      }
+
+      int fd = atoi(argv[2]);
+      zn_companion_entry(fd);
 
       return 0;
     }
@@ -45,7 +59,7 @@ int main(int argc, char *argv[]) {
     }
 
     else {
-      LOGI("Usage: zygiskd [companion|version|root]");
+      LOGI("Usage: zygiskd [companion|zn-companion|version|root]");
 
       return 0;
     }

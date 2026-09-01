@@ -25,11 +25,14 @@ ZYGISKD_CFLAGS = -D_GNU_SOURCE -std=c99 -Wpedantic -Wall -Wextra -Werror  \
 
 SRCS = src/root_impl/common.c      \
 	   src/root_impl/kernelsu.c    \
-	   src/companion.c src/main.c src/utils.c src/zygiskd.c
+	   src/companion.c src/main.c src/utils.c src/zygiskd.c src/zn_companion.c
 
 OBJS = $(patsubst src/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 BIN = $(OBJ_DIR)/zygiskd
-INCLUDES = -Isrc -Isrc/root_impl
+
+# INFO: The Zygisk Next module contract lives with the loader, the daemon hosts
+#       the companion side of it and must follow the very same layout.
+INCLUDES = -Isrc -Isrc/root_impl -I../loader/src/include
 
 .PHONY: all arch clean
 

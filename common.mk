@@ -4,7 +4,7 @@ API_LEVEL ?= 25
 ARCHS ?= arm64-v8a armeabi-v7a
 ARCH ?= arm64-v8a
 
-VER_NAME ?= v2.0.0
+VER_NAME ?= v2.1.0
 # VER_CODE = commit count + 36: 36 commits were squashed away on 2026-09-01,
 # the last pre-squash build was 578, so the sequence continues from there.
 GIT_COUNT ?= $(shell git -C "$(ROOT_DIR)" rev-list HEAD --count 2>/dev/null || echo 542)

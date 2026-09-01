@@ -13,6 +13,15 @@ The Zygisk Next developers are famous and trusted in the Android community, howe
 ## Advantages
 
 - FOSS (Forever)
+- Zygisk Next module support
+
+## Zygisk Next support
+
+VexZygisk speaks the Zygisk Next API, so modules written against it — recent LSPosed builds among them — can load through it.
+
+- Modules are listed through `zn_modules.txt`, with per-target resolution and optional companions. A companion is forked from the daemon so it keeps the daemon's privileged SELinux domain instead of the restricted domain of the process that loaded the module.
+- Module libraries are handed over as memfds rather than descriptors of the files themselves, so an unprivileged target can load them without touching the module files' own mode and SELinux label.
+- Zygisk and Zygisk Next modules are served side by side: a module may ship both a `zygisk/<arch>.so` and a `zn_modules.txt` (LSPosed does), and each is handled by its own path without excluding the other.
 
 ## Dependencies
 

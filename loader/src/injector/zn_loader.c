@@ -514,7 +514,8 @@ void zn_load_all_modules(void) {
 
   struct dirent *entry;
   while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_type != DT_DIR) continue;
+    if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 || strcmp(entry->d_name, "rezygisk") == 0) continue;
 
     char module_dir[PATH_MAX];
     snprintf(module_dir, PATH_MAX, "%s/%s", ZN_MODULES_DIR, entry->d_name);

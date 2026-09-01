@@ -8,6 +8,4 @@
          ELF reader already linked into this library. */
 const struct ZygiskNextAPI *zn_get_api(void);
 
-void zn_api_deinit(void);
-
 #endif /* ZN_API_H */

@@ -197,10 +197,3 @@ static const struct ZygiskNextAPI zn_api = {
 const struct ZygiskNextAPI *zn_get_api(void) {
   return &zn_api;
 }
-
-void zn_api_deinit(void) {
-  if (!plt_ctx_ready) return;
-
-  plti_deinit(&plt_ctx);
-  plt_ctx_ready = false;
-}

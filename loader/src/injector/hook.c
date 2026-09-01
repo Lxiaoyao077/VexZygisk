@@ -963,8 +963,6 @@ static bool load_modules_only(void) {
       /* INFO: In case a module failed to load, update the list of available modules
            in VexZygiskd to avoid a mismatch between the loaded modules in VexZygisk
            Zygote library and the available modules in VexZygiskd. */
-      /* TODO: Update the list of modules for VexZygisk monitor, so that it can update
-                 the module description. That is simply cosmetic, though. */
       rezygiskd_remove_module(i);
 
       continue;

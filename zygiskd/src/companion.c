@@ -46,7 +46,6 @@ zygisk_companion_entry load_module(int fd) {
   return (zygisk_companion_entry)entry;
 }
 
-/* WARNING: Dynamic memory based */
 void *entry_thread(void *arg) {
   struct companion_module_thread_args *args = (struct companion_module_thread_args *)arg;
 
@@ -80,7 +79,6 @@ void *entry_thread(void *arg) {
   return NULL;
 }
 
-/* WARNING: Dynamic memory based */
 void companion_entry(int fd) {
   LOGI("New companion entry.\n - Client fd: %d\n", fd);
 

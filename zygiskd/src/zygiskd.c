@@ -151,7 +151,6 @@ static void parse_zn_module_file(const char *module_dir, struct ZnModule *module
   fclose(fp);
 }
 
-/* WARNING: Dynamic memory based */
 static bool add_zn_module(struct Context *restrict context, const char *name) {
   struct ZnModule *tmp = realloc(context->zn_modules, (context->zn_len + 1) * sizeof(struct ZnModule));
   if (tmp == NULL) {
@@ -187,7 +186,6 @@ static bool add_zn_module(struct Context *restrict context, const char *name) {
          defined further down where the rest of the context handling lives. */
 static void free_modules(struct Context *restrict context);
 
-/* WARNING: Dynamic memory based */
 static void load_modules(struct Context *restrict context) {
   context->len = 0;
   context->modules = NULL;
@@ -402,16 +400,13 @@ static bool zn_matches_target(const char *target, bool is_name, const char *proc
   return strcmp(process_path, target) == 0;
 }
 
-/* INFO: Forks a process running "zygiskd zn-companion", which keeps the
-         daemon's SELinux domain instead of the restricted one of the target
-         that asked for it. Returns the control socket, or -1 on failure.
-
-         Unlike the Zygisk companion this one takes a path rather than a module
-         name: Zygisk Next modules are not tracked by index in the context. */
-static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_path) {
+/* Forks a process that runs "zygiskd <mode> <fd>" and hands it the child end
+   of a socket pair, so the companion keeps the daemon's SELinux domain.
+   Returns 0 with the parent end in *out_fd, or -1 on failure. */
+static int exec_companion(char *restrict argv[], const char *restrict tag, const char *restrict mode, int *out_fd) {
   int sockets[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
-    LOGE("Failed creating the Zygisk Next companion socket pair.");
+    LOGE("Failed creating the companion socket pair.");
 
     return -1;
   }
@@ -421,7 +416,7 @@ static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_pa
 
   pid_t pid = fork();
   if (pid < 0) {
-    LOGE("Failed forking the Zygisk Next companion: %s", strerror(errno));
+    LOGE("Failed forking the companion: %s", strerror(errno));
 
     close(companion_fd);
     close(daemon_fd);
@@ -443,58 +438,13 @@ static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_pa
       return -1;
     }
 
-    if (write_string(daemon_fd, lib_path) == -1) {
-      LOGE("Failed writing the Zygisk Next library path.");
+    *out_fd = daemon_fd;
 
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    int lib_fd = create_library_fd(lib_path);
-    if (lib_fd == -1) {
-      LOGE("Failed handing over \"%s\"", lib_path);
-
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    if (write_fd(daemon_fd, lib_fd) == -1) {
-      LOGE("Failed sending the Zygisk Next library fd.");
-
-      close(lib_fd);
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    close(lib_fd);
-
-    uint8_t response = 0;
-    ssize_t ret = read_uint8_t(daemon_fd, &response);
-    if (ret <= 0) {
-      LOGE("Failed reading the Zygisk Next companion response.");
-
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    if (response != 1) {
-      LOGE("The Zygisk Next companion rejected \"%s\"", lib_path);
-
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    return daemon_fd;
+    return 0;
   }
 
   close(daemon_fd);
 
-  /* INFO: Remove FD_CLOEXEC flag to avoid closing upon exec */
   if (fcntl(companion_fd, F_SETFD, 0) == -1) {
     LOGE("Failed removing FD_CLOEXEC flag: %s", strerror(errno));
 
@@ -503,25 +453,23 @@ static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_pa
     exit(1);
   }
 
-  char *process = argv[0];
+  char *last = strrchr(argv[0], '/');
+
   char nice_name[256];
-  char *last = strrchr(process, '/');
-  if (last == NULL) {
-    snprintf(nice_name, sizeof(nice_name), "%s", process);
-  } else {
-    snprintf(nice_name, sizeof(nice_name), "%s", last + 1);
-  }
+  snprintf(nice_name, sizeof(nice_name), "%s", last == NULL ? argv[0] : last + 1);
 
   char process_name[256];
-  snprintf(process_name, sizeof(process_name), "%s-zn-companion", nice_name);
+  snprintf(process_name, sizeof(process_name), "%s-%s", nice_name, tag);
 
   char companion_fd_str[32];
   snprintf(companion_fd_str, sizeof(companion_fd_str), "%d", companion_fd);
 
-  char mode[] = "zn-companion";
-  char *eargv[] = { process_name, mode, companion_fd_str, NULL };
+  char mode_arg[32];
+  snprintf(mode_arg, sizeof(mode_arg), "%s", mode);
+
+  char *eargv[] = { process_name, mode_arg, companion_fd_str, NULL };
   if (non_blocking_execv(ZYGISKD_PATH, eargv) == -1) {
-    LOGE("Failed executing the Zygisk Next companion: %s", strerror(errno));
+    LOGE("Failed executing the companion: %s", strerror(errno));
 
     close(companion_fd);
 
@@ -531,12 +479,114 @@ static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_pa
   exit(0);
 }
 
-/* INFO: Walks every Zygisk Next module and resolves the libraries targeting
-         this process. The daemon opens the files itself because a non-root
-         target cannot read /data/adb/modules, which is the whole point of
-         handing them over as file descriptors.
+/* Spawns the companion of a Zygisk module. The library is already open, its
+   descriptor is simply handed over. Returns the control socket, -2 when the
+   module has no companion entry at all, or -1 on failure. */
+static int spawn_companion(char *restrict argv[], char *restrict name, int lib_fd) {
+  int daemon_fd = -1;
+  if (exec_companion(argv, name, "companion", &daemon_fd) == -1) return -1;
 
-   WARNING: Dynamic memory based */
+  if (write_string(daemon_fd, name) == -1) {
+    LOGE("Failed writing module name.");
+
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  if (write_fd(daemon_fd, lib_fd) == -1) {
+    LOGE("Failed sending library fd.");
+
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  uint8_t response = 0;
+  if (read_uint8_t(daemon_fd, &response) <= 0) {
+    LOGE("Failed reading companion response.");
+
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  if (response == 0) {
+    close(daemon_fd);
+
+    return -2;
+  }
+
+  if (response != 1) {
+    LOGE("Unexpected companion response %u", response);
+
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  return daemon_fd;
+}
+
+/* Spawns the companion of a Zygisk Next module. Takes a path rather than a
+   module name because ZN modules are not tracked by index; the library is
+   copied into a memfd here since the companion cannot read /data/adb/modules. */
+static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_path) {
+  int daemon_fd = -1;
+  if (exec_companion(argv, "zn-companion", "zn-companion", &daemon_fd) == -1) return -1;
+
+  if (write_string(daemon_fd, lib_path) == -1) {
+    LOGE("Failed writing the Zygisk Next library path.");
+
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  int lib_fd = create_library_fd(lib_path);
+  if (lib_fd == -1) {
+    LOGE("Failed handing over \"%s\"", lib_path);
+
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  if (write_fd(daemon_fd, lib_fd) == -1) {
+    LOGE("Failed sending the Zygisk Next library fd.");
+
+    close(lib_fd);
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  close(lib_fd);
+
+  uint8_t response = 0;
+  if (read_uint8_t(daemon_fd, &response) <= 0) {
+    LOGE("Failed reading the Zygisk Next companion response.");
+
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  if (response != 1) {
+    LOGE("The Zygisk Next companion rejected \"%s\"", lib_path);
+
+    close(daemon_fd);
+
+    return -1;
+  }
+
+  return daemon_fd;
+}
+
+/* Walks every Zygisk Next module and resolves the libraries targeting this
+   process. The daemon opens the files itself because a non-root target cannot
+   read /data/adb/modules, which is the whole point of handing them over as
+   file descriptors. */
 static bool collect_zn_modules(const char *process_name, const char *process_path, struct ZnModuleFile **out, size_t *out_len) {
   *out = NULL;
   *out_len = 0;
@@ -552,7 +602,7 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 
   struct dirent *entry;
   while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_type != DT_DIR) continue;
+    if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
     if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 || strcmp(entry->d_name, "rezygisk") == 0) continue;
 
     char module_dir[PATH_MAX];
@@ -643,130 +693,9 @@ static int create_daemon_socket(void) {
   return unix_listener_from_path(PATH_CP_NAME);
 }
 
-static int spawn_companion(char *restrict argv[], char *restrict name, int lib_fd) {
-  int sockets[2];
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
-    LOGE("Failed creating socket pair.");
-
-    return -1;
-  }
-
-  int daemon_fd = sockets[0];
-  int companion_fd = sockets[1];
-
-  pid_t pid = fork();
-  if (pid < 0) {
-    LOGE("Failed forking companion: %s", strerror(errno));
-
-    close(companion_fd);
-    close(daemon_fd);
-
-    return -1;
-  }
-
-  if (pid > 0) {
-    close(companion_fd);
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-      LOGE("Exited with status %d", status);
-
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    if (write_string(daemon_fd, name) == -1) {
-      LOGE("Failed writing module name.");
-
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    if (write_fd(daemon_fd, lib_fd) == -1) {
-      LOGE("Failed sending library fd.");
-
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    uint8_t response = 0;
-    ssize_t ret = read_uint8_t(daemon_fd, &response);
-    if (ret <= 0) {
-      LOGE("Failed reading companion response.");
-
-      close(daemon_fd);
-
-      return -1;
-    }
-
-    switch (response) {
-      /* INFO: Even without any entry, we should still just deal with it */
-      case 0: {
-        close(daemon_fd);
-
-        return -2;
-      }
-      case 1: { return daemon_fd; }
-      /* TODO: Should we be closing daemon socket here? (in non-0-and-1 case) */
-      default: {
-        close(daemon_fd);
-
-        return -1;
-      }
-    }
-  /* INFO: if pid == 0: */
-  }
-
-  close(daemon_fd);
-
-  /* INFO: There is no case where this will fail with a valid fd. */
-  /* INFO: Remove FD_CLOEXEC flag to avoid closing upon exec */
-  if (fcntl(companion_fd, F_SETFD, 0) == -1) {
-    LOGE("Failed removing FD_CLOEXEC flag: %s", strerror(errno));
-
-    close(companion_fd);
-
-    exit(1);
-  }
-
-  char *process = argv[0];
-  char nice_name[256];
-  char *last = strrchr(process, '/');
-  if (last == NULL) {
-    snprintf(nice_name, sizeof(nice_name), "%s", process);
-  } else {
-    snprintf(nice_name, sizeof(nice_name), "%s", last + 1);
-  }
-
-  char process_name[256];
-  snprintf(process_name, sizeof(process_name), "%s-%s", nice_name, name);
-
-  char companion_fd_str[32];
-  snprintf(companion_fd_str, sizeof(companion_fd_str), "%d", companion_fd);
-
-  char companion[] = "companion";
-  char *eargv[] = { process_name, companion, companion_fd_str, NULL };
-  if (non_blocking_execv(ZYGISKD_PATH, eargv) == -1) {
-    LOGE("Failed executing companion: %s", strerror(errno));
-
-    close(companion_fd);
-
-    exit(1);
-  }
-
-  exit(0);
-}
-
-/* WARNING: Dynamic memory based */
 void zygiskd_start(char *restrict argv[]) {
-  /* INFO: When no root implementation is found, it won't set the values
-            for the context, causing it to have garbage values. In response
-            to that, "= { 0 }" is used to ensure that the values are clean. */
+  /* load_modules and the socket handlers free through free_modules, so the
+     context must start as a clean zeroed slate on every path. */
   struct Context context = { 0 };
 
   struct root_impl impl;
@@ -814,6 +743,9 @@ void zygiskd_start(char *restrict argv[]) {
   while (1) {
     int client_fd = accept(socket_fd, NULL, NULL);
     if (client_fd == -1) {
+      /* A signal (EINTR) only interrupts this one wait; keep serving. */
+      if (errno == EINTR) continue;
+
       LOGE("accept: %s", strerror(errno));
 
       break;
@@ -1084,12 +1016,7 @@ void zygiskd_start(char *restrict argv[]) {
           }
         }
 
-        /*
-          INFO: Companion already exists or was created. In any way,
-                 it should be in the while loop to receive fds now,
-                 so just sending the file descriptor of the client is
-                 safe.
-        */
+        /* The companion socket is ready to receive the client fd. */
         if (module->companion >= 0) {
           LOGI(" - Sending companion fd socket of module \"%s\"", module->name);
 

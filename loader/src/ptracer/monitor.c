@@ -979,6 +979,21 @@ static char pre_section[1024];
 static char post_section[1024];
 static char module_text[2048];
 
+/* INFO: A module that ships both a Zygisk library and a zn_modules.txt lands in
+         both the plain and the Zygisk Next lists, so check for a Next twin
+         before listing the plain copy. */
+static bool has_zn_twin(const char *name) {
+  if (environment_information.modules_zn == NULL) return false;
+
+  for (uint32_t j = 0; j < environment_information.modules_len; j++) {
+    if (environment_information.modules_zn[j] &&
+        environment_information.modules[j] != NULL &&
+        strcmp(environment_information.modules[j], name) == 0) return true;
+  }
+
+  return false;
+}
+
 /* INFO: Folds the detected Zygisk modules into the module description so the
          manager shows them right on the module card, Mountify-style. */
 static void build_module_text(void) {
@@ -987,11 +1002,19 @@ static void build_module_text(void) {
   if (environment_information.modules == NULL || environment_information.modules_len == 0) return;
 
   size_t off = snprintf(module_text, sizeof(module_text), "Modules: ");
+  bool first = true;
+
   for (uint32_t i = 0; i < environment_information.modules_len && off < sizeof(module_text); i++) {
-    const char *name = environment_information.modules[i] ? environment_information.modules[i] : "?";
+    const char *name = environment_information.modules[i];
+    if (name == NULL) continue;
+
     bool is_next = environment_information.modules_zn && environment_information.modules_zn[i];
 
-    if (i > 0) off += snprintf(module_text + off, sizeof(module_text) - off, ", ");
+    if (!is_next && has_zn_twin(name)) continue;
+
+    if (!first) off += snprintf(module_text + off, sizeof(module_text) - off, ", ");
+    first = false;
+
     off += snprintf(module_text + off, sizeof(module_text) - off, "%s%s", name, is_next ? " (Next)" : "");
   }
 

@@ -469,15 +469,31 @@ static int exec_companion(char *restrict argv[], const char *restrict tag, const
   snprintf(mode_arg, sizeof(mode_arg), "%s", mode);
 
   char *eargv[] = { process_name, mode_arg, companion_fd_str, NULL };
-  execv(ZYGISKD_PATH, eargv);
 
-  /* INFO: execv only returns when the companion binary could not be run; the
-             non-zero exit lets the parent's waitpid detect the failure. */
-  LOGE("Failed executing the companion: %s", strerror(errno));
+  /* INFO: The parent waitpids on this process, so it must not become the
+            companion itself: fork once more and let the grandchild exec,
+            orphaning the long-lived companion to init. The earlier
+            non_blocking_execv hid this double fork behind a dead pipe. */
+  pid_t inner_pid = fork();
+  if (inner_pid == -1) {
+    LOGE("Failed forking the companion child: %s", strerror(errno));
 
-  close(companion_fd);
+    close(companion_fd);
 
-  exit(1);
+    exit(1);
+  }
+
+  if (inner_pid == 0) {
+    execv(ZYGISKD_PATH, eargv);
+
+    LOGE("Failed executing the companion: %s", strerror(errno));
+
+    close(companion_fd);
+
+    _exit(1);
+  }
+
+  _exit(0);
 }
 
 /* Spawns the companion of a Zygisk module. The library is already open, its

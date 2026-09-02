@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <sys/ptrace.h>
 
+#include <link.h>
+
 #include "misc.h"
 
 /* Redefining logging macros with different tag */

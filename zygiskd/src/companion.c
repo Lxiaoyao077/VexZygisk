@@ -69,7 +69,7 @@ void *entry_thread(void *arg) {
   */
   struct stat st1;
   if (fstat(fd, &st1) != -1 && st0.st_ino == st1.st_ino) {
-    LOGI(" - Client fd changed after module entry");
+    LOGI(" - Client fd unchanged after module entry, closing it");
 
     close(fd);
   }
@@ -82,7 +82,7 @@ void *entry_thread(void *arg) {
 void companion_entry(int fd) {
   LOGI("New companion entry.\n - Client fd: %d\n", fd);
 
-  char name[256 + 1];
+  char name[PROCESS_NAME_MAX_LEN];
   ssize_t ret = read_string(fd, name, sizeof(name));
   if (ret == -1) {
     LOGE("Failed to read module name");

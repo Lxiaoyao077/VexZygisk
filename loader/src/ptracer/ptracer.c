@@ -21,7 +21,10 @@
 bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, uintptr_t libc_init_got_slot, bool is_tango) {
   LOGI("injecting %s to zygote %d via GOT hook", lib_path, pid);
 
-  uintptr_t break_addr = (uintptr_t)((intptr_t)(-0x0F & ~1) | (intptr_t)(libc_init_target & 1));
+  /* INFO: The GOT slot is poisoned with a guaranteed-unmapped address so the
+            call to __libc_init faults and the tracer picks the process up;
+            bit 0 is preserved for the Thumb bit on 32-bit ARM. */
+  uintptr_t break_addr = (uintptr_t)-16 | (libc_init_target & 1);
   if (!ptrace_poke_uintptr(pid, libc_init_got_slot, break_addr)) {
     LOGE("Failed to patch GOT slot with break_addr");
 
@@ -129,7 +132,6 @@ bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, u
   return true;
 }
 
-#define STOPPED_WITH(sig, event) (WIFSTOPPED(status) && WSTOPSIG(status) == (sig) && (status >> 16) == (event))
 #define WAIT_OR_DIE wait_for_trace(pid, &status, __WALL);
 #define CONT_OR_DIE                           \
   if (ptrace(PTRACE_CONT, pid, 0, 0) == -1) { \
@@ -141,33 +143,28 @@ bool inject_on_main(int pid, const char *lib_path, uintptr_t libc_init_target, u
 bool trace_zygote(int pid, bool tango_flag) {
   LOGI("start tracing %d (tracer %d)", pid, getpid());
 
-  /* INFO: Set value 0 to make compiler happy. */
   int status = 0;
 
   struct kernel_version version = parse_kversion();
-  if (version.major > 3 || (version.major == 3 && version.minor >= 8)) {
-    if (ptrace(PTRACE_SEIZE, pid, 0, PTRACE_O_EXITKILL | PTRACE_O_TRACESECCOMP) == -1) {
-      PLOGE("seize for tango");
 
-      return false;
-    }
+  /* INFO: EXITKILL keeps a tracer death from leaving a traced zygote behind,
+            and TRACESECCOMP lets wait_for_trace skip seccomp events. */
+  long seize_options = 0;
+  if (version.major > 3 || (version.major == 3 && version.minor >= 8)) seize_options = PTRACE_O_EXITKILL | PTRACE_O_TRACESECCOMP;
 
-    WAIT_OR_DIE;
-  } else {
-    if (ptrace(PTRACE_SEIZE, pid, 0, 0) == -1) {
-      PLOGE("seize");
+  if (ptrace(PTRACE_SEIZE, pid, 0, seize_options) == -1) {
+    PLOGE("seize");
 
-      return false;
-    }
-
-    WAIT_OR_DIE;
+    return false;
   }
+
+  WAIT_OR_DIE;
 
   kill(pid, SIGCONT);
   ptrace(PTRACE_SYSCALL, pid, 0, 0);
 
-  int dummy;
-  wait_for_ptrace_syscall_stop(pid, &dummy);
+  int syscall_stop_status;
+  wait_for_ptrace_syscall_stop(pid, &syscall_stop_status);
 
   uintptr_t libc_init_got_slot = 0, libc_init_resolved = 0;
   if (!wait_linker_ready(pid, &libc_init_resolved, &libc_init_got_slot)) {
@@ -180,7 +177,10 @@ bool trace_zygote(int pid, bool tango_flag) {
 
   LOGD("Resolved __libc_init at %p (GOT slot %p)", (void *)libc_init_resolved, (void *)libc_init_got_slot);
 
-  if (STOPPED_WITH(SIGSTOP, PTRACE_EVENT_STOP)) {
+  /* INFO: `status` intentionally still holds the stop observed right after the
+            seize: the waits above only synchronized the syscall-stop and the
+            linker, and left it untouched. */
+  if (STOPPED_WITH(status, SIGSTOP, PTRACE_EVENT_STOP)) {
     char *lib_path = "/data/adb/modules/rezygisk/lib" LP_SELECT("", "64") "/libzygisk.so";
     if (!inject_on_main(pid, lib_path, libc_init_resolved, libc_init_got_slot, tango_flag)) {
       LOGE("failed to inject");
@@ -198,11 +198,11 @@ bool trace_zygote(int pid, bool tango_flag) {
     CONT_OR_DIE
     WAIT_OR_DIE
 
-    if (STOPPED_WITH(SIGTRAP, PTRACE_EVENT_STOP)) {
+    if (STOPPED_WITH(status, SIGTRAP, PTRACE_EVENT_STOP)) {
       CONT_OR_DIE
       WAIT_OR_DIE
 
-      if (STOPPED_WITH(SIGCONT, 0)) {
+      if (STOPPED_WITH(status, SIGCONT, 0)) {
         LOGD("received SIGCONT");
 
         /* INFO: Due to kernel bugs, fixed in 5.16+, ptrace_message (msg of

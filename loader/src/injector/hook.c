@@ -205,7 +205,7 @@ static bool update_mnt_ns(enum mount_namespace_state mns_state, bool dry_run) {
     return false;
   }
 
-  char *mns_state_str = "unknown";
+  const char *mns_state_str = "unknown";
   if (mns_state == Clean) mns_state_str = "clean";
   if (mns_state == Mounted) mns_state_str = "mounted";
 
@@ -229,11 +229,11 @@ static bool update_mnt_ns(enum mount_namespace_state mns_state, bool dry_run) {
   ret (*old_##func)(__VA_ARGS__);     \
   ret new_##func(__VA_ARGS__)
 
-/* INFO: VexZygisk already performs a fork in zygisk_context::fork_pre, because of that,
+/* INFO: VexZygisk already performs a fork in rz_fork_pre, because of that,
            we avoid duplicate fork in nativeForkAndSpecialize and nativeForkSystemServer
-           by caching the pid in fork_pre function and only performing fork if the pid
-           is non-0, or in other words, if we (libzygisk.so) already forked.
-*/
+           by caching the pid in fork_pre function and only returning the cached
+           pid while it is non-negative, i.e. also for the forked child itself.
+           A negative pid means the cached fork failed and the caller has to fork. */
 DCL_HOOK_FUNC(int, fork) {
   return (g_ctx && g_ctx->pid >= 0) ? g_ctx->pid : old_fork();
 }
@@ -459,7 +459,7 @@ static void initialize_jni_hook(void) {
 
     for (size_t i = 0; i < maps->length; i++) {
       struct map_entry *map = &maps->maps[i];
-      if (map->path && !strstr(map->path, "/libnativehelper.so")) continue;
+      if (map->path == NULL || !strstr(map->path, "/libnativehelper.so")) continue;
 
       /* TODO: Add RTLD_NOLOAD? */
       void *handle = dlopen(map->path, RTLD_LAZY);
@@ -554,6 +554,37 @@ static void api_plt_hook_exclude(const char *regex, const char *symbol) {
   pthread_mutex_unlock(&g_ctx->hook_info_lock);
 }
 
+/* INFO: Drops every pending PLT registration; both lists live in the context
+           and carry compiled regexes plus duplicated strings. */
+static void clear_hook_info(struct zygisk_context *ctx) {
+  for (size_t i = 0; i < ctx->register_info_count; i++) {
+    regfree(&ctx->register_info[i].regex);
+    free(ctx->register_info[i].symbol);
+  }
+  ctx->register_info_count = 0;
+
+  for (size_t i = 0; i < ctx->ignore_info_count; i++) {
+    regfree(&ctx->ignore_info[i].regex);
+    free(ctx->ignore_info[i].symbol);
+  }
+  ctx->ignore_info_count = 0;
+}
+
+/* INFO: Releases the v4 deferred PLT hook list; the paths and symbols were
+           duplicated at registration time, the rest are borrowed pointers. */
+static void free_plt_hook_list(void) {
+  if (plt_hook_list == NULL) return;
+
+  for (size_t i = 0; i < plt_hook_list_count; i++) {
+    free((void *)plt_hook_list[i].lib_path);
+    free((void *)plt_hook_list[i].symbol);
+  }
+
+  free(plt_hook_list);
+  plt_hook_list = NULL;
+  plt_hook_list_count = 0;
+}
+
 static bool api_plt_hook_commit(void) {
   if (!g_ctx || g_ctx->register_info_count == 0) return false;
 
@@ -598,18 +629,7 @@ static bool api_plt_hook_commit(void) {
 
   free_maps(map_infos);
 
-  /* INFO: Clear register_info and ignore_info */
-  for (size_t i = 0; i < g_ctx->register_info_count; i++) {
-    regfree(&g_ctx->register_info[i].regex);
-    free(g_ctx->register_info[i].symbol);
-  }
-  g_ctx->register_info_count = 0;
-
-  for (size_t i = 0; i < g_ctx->ignore_info_count; i++) {
-    regfree(&g_ctx->ignore_info[i].regex);
-    free(g_ctx->ignore_info[i].symbol);
-  }
-  g_ctx->ignore_info_count = 0;
+  clear_hook_info(g_ctx);
 
   pthread_mutex_unlock(&g_ctx->hook_info_lock);
 
@@ -709,16 +729,7 @@ static bool api_plt_hook_commit_v4(void) {
     }
   }
 
-  if (plt_hook_list) {
-    for (size_t i = 0; i < plt_hook_list_count; i++) {
-      free((void *)plt_hook_list[i].lib_path);
-      free((void *)plt_hook_list[i].symbol);
-    }
-
-    free(plt_hook_list);
-    plt_hook_list = NULL;
-    plt_hook_list_count = 0;
-  }
+  free_plt_hook_list();
 
   return !any_failed;
 }
@@ -729,26 +740,32 @@ static bool api_plt_hook_commit_v4(void) {
 #define ENCODE_ID(id) ((void *)((size_t)(id) + RZID_MAGIC))
 #define DECODE_ID(ptr) ((size_t)(ptr) - RZID_MAGIC)
 
+/* INFO: Decodes an encoded module id into its index, or SIZE_MAX when the
+           caller passed something that was never handed out. */
+static size_t decode_module_id(void *id) {
+  if ((size_t)id < RZID_MAGIC || DECODE_ID(id) >= zygisk_module_length) {
+    LOGE("Invalid (encoded) module id %zu", (size_t)id);
+
+    return SIZE_MAX;
+  }
+
+  return DECODE_ID(id);
+}
+
 static int api_connect_companion(void *id) {
   if (!g_ctx) return -1;
 
-  if ((size_t)id < RZID_MAGIC || (size_t)id >= RZID_MAGIC + zygisk_module_length) {
-    LOGE("Invalid (encoded) module id %zu", (size_t)id);
+  size_t index = decode_module_id(id);
+  if (index == SIZE_MAX) return -1;
 
-    return -1;
-  }
-
-  return rezygiskd_connect_companion(DECODE_ID(id));
+  return rezygiskd_connect_companion(index);
 }
 
 static void api_set_option(void *id, enum rezygisk_options opt) {
   if (!g_ctx) return;
 
-  if ((size_t)id < RZID_MAGIC || (size_t)id >= RZID_MAGIC + zygisk_module_length) {
-    LOGE("Invalid (encoded) module id %zu", (size_t)id);
-
-    return;
-  }
+  size_t index = decode_module_id(id);
+  if (index == SIZE_MAX) return;
 
   switch (opt) {
     case FORCE_DENYLIST_UNMOUNT: {
@@ -757,7 +774,7 @@ static void api_set_option(void *id, enum rezygisk_options opt) {
       break;
     }
     case DLCLOSE_MODULE_LIBRARY: {
-      struct rezygisk_module *m_lib = &zygisk_modules[DECODE_ID(id)];
+      struct rezygisk_module *m_lib = &zygisk_modules[index];
       m_lib->unload = true;
 
       break;
@@ -768,13 +785,10 @@ static void api_set_option(void *id, enum rezygisk_options opt) {
 static int api_get_module_dir(void *id) {
   if (!g_ctx) return -1;
 
-  if ((size_t)id < RZID_MAGIC || (size_t)id >= RZID_MAGIC + zygisk_module_length) {
-    LOGE("Invalid (encoded) module id %zu", (size_t)id);
+  size_t index = decode_module_id(id);
+  if (index == SIZE_MAX) return -1;
 
-    return -1;
-  }
-
-  return rezygiskd_get_module_dir(DECODE_ID(id));
+  return rezygiskd_get_module_dir(index);
 }
 
 static uint32_t api_get_flags(void) {
@@ -1097,7 +1111,6 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
   if ((ctx->info_flags & PROCESS_IS_MANAGER) == PROCESS_IS_MANAGER) {
     LOGD("Manager process detected. Notifying that Zygisk has been enabled.");
 
-
     /* INFO: Tells the root manager that Zygisk is working, so that it can be
                recognized as enabled and Zygisk modules work properly.
     */
@@ -1244,28 +1257,9 @@ static void rz_cleanup(struct zygisk_context *ctx) {
   jni_hook_list = NULL;
   jni_hook_list_count = 0;
 
-  for (size_t i = 0; i < ctx->register_info_count; i++) {
-    regfree(&ctx->register_info[i].regex);
-    free(ctx->register_info[i].symbol);
-  }
-  ctx->register_info_count = 0;
+  clear_hook_info(ctx);
 
-  for (size_t i = 0; i < ctx->ignore_info_count; i++) {
-    regfree(&ctx->ignore_info[i].regex);
-    free(ctx->ignore_info[i].symbol);
-  }
-  ctx->ignore_info_count = 0;
-
-  if (plt_hook_list) {
-    for (size_t i = 0; i < plt_hook_list_count; i++) {
-      free((void *)plt_hook_list[i].lib_path);
-      free((void *)plt_hook_list[i].symbol);
-    }
-
-    free(plt_hook_list);
-    plt_hook_list = NULL;
-    plt_hook_list_count = 0;
-  }
+  free_plt_hook_list();
 
   /* INFO: Strip out all API function pointers */
   for (size_t i = 0; i < zygisk_module_length; i++) {
@@ -1318,9 +1312,17 @@ static bool hook_unregister(const char *lib_name, const char *symbol, bool is_pr
   PLT_HOOK_UNREGISTER_SYM(LIB, #SYM, SYM, IS_PREFIX)
 
 void hook_functions(void) {
-  plti_init(&plti_ctx);
+  if (!plti_init(&plti_ctx)) {
+    LOGE("Failed to initialize PLTI");
 
-  plti_add_lib(&plti_ctx, "libandroid_runtime.so");
+    return;
+  }
+
+  if (!plti_add_lib(&plti_ctx, "libandroid_runtime.so")) {
+    LOGE("Failed to add libandroid_runtime.so to PLTI");
+
+    return;
+  }
 
   PLT_HOOK_REGISTER("libandroid_runtime.so", fork, false);
   PLT_HOOK_REGISTER("libandroid_runtime.so", strdup, false);

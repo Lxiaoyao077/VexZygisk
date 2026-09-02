@@ -56,7 +56,7 @@ static inline const char *rezygiskd_get_path() {
   return TMP_PATH;
 }
 
-bool rezygiskd_zygote_injected();
+bool rezygiskd_zygote_injected(void);
 
 uint32_t rezygiskd_get_process_flags(uid_t uid, const char *const process);
 
@@ -83,7 +83,7 @@ int rezygiskd_connect_companion(size_t index);
 
 int rezygiskd_get_module_dir(size_t index);
 
-void rezygiskd_zygote_restart();
+void rezygiskd_zygote_restart(void);
 
 bool rezygiskd_update_mns(enum mount_namespace_state nms_state, char *buf, size_t buf_size);
 

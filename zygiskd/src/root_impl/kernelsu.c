@@ -10,10 +10,8 @@
 
 #include "kernelsu.h"
 
-/* INFO: It would be presumed it is a unsigned int,
-           so we need to cast it to signed int to
-           avoid any potential UB.
-*/
+/* INFO: 0xDEADBEEF and 0xCAFEBABE exceed INT_MAX, so the constants are written
+           as signed ints to keep the syscall arguments well defined. */
 #define KSU_INSTALL_MAGIC1 (int)0xDEADBEEF
 #define KSU_INSTALL_MAGIC2 (int)0xCAFEBABE
 
@@ -57,6 +55,9 @@ void ksu_get_existence(struct root_impl_state *state) {
   if (access("/data/adb/ksud", F_OK) == -1) {
     LOGW("KernelSU (ioctl) detected, but ksud not found.");
 
+    close(ksu_fd);
+    ksu_fd = -1;
+
     state->state = Inexistent;
 
     return;
@@ -74,7 +75,6 @@ void ksu_get_existence(struct root_impl_state *state) {
     /* INFO: Not a fatal error, just log and continue */
   }
 
-  state->variant = KOfficial;
   state->state = Supported;
 }
 

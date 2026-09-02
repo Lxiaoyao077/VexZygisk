@@ -64,10 +64,11 @@ struct ZnModuleFile {
   #error "Unsupported architecture"
 #endif
 
-/* INFO: A trailing byte tells the monitor whether the module targets Zygisk Next */
-static void send_module_info(const char *name, bool is_zn) {
+/* INFO: A standard Zygisk module entry: the trailing zero byte tells the
+           monitor whether the module targets Zygisk Next. */
+static void send_module_info(const char *name) {
   uint32_t module_name_len = (uint32_t)strlen(name);
-  uint8_t module_type = is_zn ? 1 : 0;
+  uint8_t module_type = 0;
 
   unix_datagram_sendto(CONTROLLER_SOCKET, &module_name_len, sizeof(module_name_len));
   unix_datagram_sendto(CONTROLLER_SOCKET, name, module_name_len);
@@ -212,12 +213,12 @@ static void load_modules(struct Context *restrict context) {
     char *name = entry->d_name;
 
     char disabled[PATH_MAX];
-    snprintf(disabled, PATH_MAX, "/data/adb/modules/%s/disable", name);
+    snprintf(disabled, PATH_MAX, PATH_MODULES_DIR "/%s/disable", name);
 
     if (access(disabled, F_OK) == 0) continue;
 
     char zn_modules[PATH_MAX];
-    snprintf(zn_modules, PATH_MAX, "/data/adb/modules/%s/zn_modules.txt", name);
+    snprintf(zn_modules, PATH_MAX, PATH_MODULES_DIR "/%s/zn_modules.txt", name);
 
     /* INFO: The two mechanisms are served side by side rather than picked
              between, which is what NyaZygisk does and what LSPosed depends on.
@@ -239,7 +240,7 @@ static void load_modules(struct Context *restrict context) {
     }
 
     char so_path[PATH_MAX];
-    snprintf(so_path, PATH_MAX, "/data/adb/modules/%s/zygisk/" ARCH_STR ".so", name);
+    snprintf(so_path, PATH_MAX, PATH_MODULES_DIR "/%s/zygisk/" ARCH_STR ".so", name);
 
     if (access(so_path, R_OK) == -1) continue;
 
@@ -468,15 +469,15 @@ static int exec_companion(char *restrict argv[], const char *restrict tag, const
   snprintf(mode_arg, sizeof(mode_arg), "%s", mode);
 
   char *eargv[] = { process_name, mode_arg, companion_fd_str, NULL };
-  if (non_blocking_execv(ZYGISKD_PATH, eargv) == -1) {
-    LOGE("Failed executing the companion: %s", strerror(errno));
+  execv(ZYGISKD_PATH, eargv);
 
-    close(companion_fd);
+  /* INFO: execv only returns when the companion binary could not be run; the
+             non-zero exit lets the parent's waitpid detect the failure. */
+  LOGE("Failed executing the companion: %s", strerror(errno));
 
-    exit(1);
-  }
+  close(companion_fd);
 
-  exit(0);
+  exit(1);
 }
 
 /* Spawns the companion of a Zygisk module. The library is already open, its
@@ -716,7 +717,7 @@ void zygiskd_start(char *restrict argv[]) {
   unix_datagram_sendto(CONTROLLER_SOCKET, &modules_len, sizeof(modules_len));
 
   for (size_t i = 0; i < context.len; i++) {
-    send_module_info(context.modules[i].name, false);
+    send_module_info(context.modules[i].name);
   }
 
   for (size_t i = 0; i < context.zn_len; i++) {
@@ -758,13 +759,13 @@ void zygiskd_start(char *restrict argv[]) {
 
       close(client_fd);
 
-      break;
+      continue;
     } else if (len == 0) {
       LOGI("Client disconnected");
 
       close(client_fd);
 
-      break;
+      continue;
     }
 
     enum DaemonSocketAction action = (enum DaemonSocketAction)action8;
@@ -858,7 +859,7 @@ void zygiskd_start(char *restrict argv[]) {
 
         for (size_t i = 0; i < clen; i++) {
           char lib_path[PATH_MAX];
-          snprintf(lib_path, PATH_MAX, "/data/adb/modules/%s/zygisk/" ARCH_STR ".so", context.modules[i].name);
+          snprintf(lib_path, PATH_MAX, PATH_MODULES_DIR "/%s/zygisk/" ARCH_STR ".so", context.modules[i].name);
 
           if (write_string(client_fd, lib_path) == -1) {
             LOGE("Failed writing module path.");
@@ -1018,8 +1019,8 @@ void zygiskd_start(char *restrict argv[]) {
             module->companion = -1;
           }
         } else {
-          LOGE(" - Failed to spawn companion for module \"%s\"", module->name);
-
+          /* INFO: The failure itself was already logged when the spawn was
+                     attempted; only the rejection is left to send here. */
           ret = write_uint8_t(client_fd, 0);
           ASSURE_SIZE_WRITE("RequestCompanionSocket", "response", ret, sizeof(uint8_t), break);
         }
@@ -1063,9 +1064,9 @@ void zygiskd_start(char *restrict argv[]) {
         break;
       }
       case UpdateMountNamespace: {
-        pid_t pid = 0;
-        ssize_t ret = read_uint32_t(client_fd, (uint32_t *)&pid);
-        ASSURE_SIZE_READ("UpdateMountNamespace", "pid", ret, sizeof(pid), break);
+        uint32_t target_process = 0;
+        ssize_t ret = read_uint32_t(client_fd, &target_process);
+        ASSURE_SIZE_READ("UpdateMountNamespace", "pid", ret, sizeof(target_process), break);
 
         uint8_t mns_state = 0;
         ret = read_uint8_t(client_fd, &mns_state);
@@ -1077,9 +1078,9 @@ void zygiskd_start(char *restrict argv[]) {
 
         /* Only the requested namespace is handed back; the loader never asks
            for the mounted one, so there is no reason to prime its cache here. */
-        int ns_fd = save_mns_fd(pid, (enum MountNamespaceState)mns_state);
+        int ns_fd = save_mns_fd((pid_t)target_process, (enum MountNamespaceState)mns_state);
         if (ns_fd == -1) {
-          LOGE("Failed to save mount namespace fd for pid %d: %s", pid, strerror(errno));
+          LOGE("Failed to save mount namespace fd for pid %u: %s", target_process, strerror(errno));
 
           ret = write_uint32_t(client_fd, (uint32_t)0);
           ASSURE_SIZE_WRITE("UpdateMountNamespace", "ns_fd", ret, sizeof(ns_fd), break);

@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <limits.h>
+
 #include <linux/un.h>
 #include <sys/socket.h>
 
@@ -68,7 +70,7 @@ static int rezygiskd_connect(uint8_t retry) {
 #define safe_write(fn, name, ret_type) safe_check(fn, "write " name, ret_type)
 #define safe_read(fn, name, ret_type)  safe_check(fn, "read " name, ret_type)
 
-bool rezygiskd_zygote_injected() {
+bool rezygiskd_zygote_injected(void) {
   int fd = rezygiskd_connect(5);
   if (fd == -1) return false;
 
@@ -107,12 +109,18 @@ void rezygiskd_get_info(struct rezygisk_info *info) {
 
   safe_write(write_uint8_t(fd, (uint8_t)GetInfo), "GetInfo action", return);
 
+  /* INFO: The flags word is consumed to stay in step with the protocol;
+            only the KernelSU implementation exists and the daemon always
+            sets its bit. */
   uint32_t flags = 0;
   safe_read(read_uint32_t(fd, &flags), "info flags", return);
 
   info->root_impl = ROOT_IMPL_KERNELSU;
 
-  safe_read(read_uint32_t(fd, (uint32_t *)&info->pid), "pid", return);
+  uint32_t daemon_pid = 0;
+  safe_read(read_uint32_t(fd, &daemon_pid), "pid", return);
+
+  info->pid = (pid_t)daemon_pid;
 
   safe_read(read_size_t(fd, &info->modules.modules_count), "modules count", return);
   if (info->modules.modules_count == 0) {
@@ -222,7 +230,9 @@ bool rezygiskd_read_modules(struct zygisk_modules *modules) {
   size_t len = 0;
   safe_read(read_size_t(fd, &len), "modules count", return false);
 
-  modules->modules = malloc(len * sizeof(char *));
+  /* INFO: calloc also validates the multiplication, so a corrupt count from
+            the socket cannot overflow into an undersized allocation. */
+  modules->modules = calloc(len, sizeof(char *));
   if (!modules->modules) {
     PLOGE("allocating modules name memory");
 
@@ -414,7 +424,7 @@ int rezygiskd_get_module_dir(size_t index) {
   return dirfd;
 }
 
-void rezygiskd_zygote_restart() {
+void rezygiskd_zygote_restart(void) {
   int fd = rezygiskd_connect(1);
   if (fd == -1) return;
 

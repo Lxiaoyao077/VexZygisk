@@ -9,8 +9,6 @@
 
 #include "socket_utils.h"
 
-/* TODO: Perhaps merge the write and read functions?
-           Their signature and a single function changes. */
 ssize_t write_loop(int fd, const void *buf, size_t count) {
   size_t written = 0;
   while (written < count) {
@@ -104,14 +102,14 @@ ssize_t write_fd(int fd, int sendfd) {
   return ret;
 }
 
-/* TODO: Standardize how to log errors */
 int read_fd(int fd) {
   char cmsgbuf[CMSG_SPACE(sizeof(int))];
 
-  int cnt = 1;
+  char buf[1] = { 0 };
+
   struct iovec iov = {
-    .iov_base = &cnt,
-    .iov_len = sizeof(cnt)
+    .iov_base = buf,
+    .iov_len = sizeof(buf)
   };
 
   struct msghdr msg = {

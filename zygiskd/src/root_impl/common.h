@@ -13,12 +13,10 @@ enum root_impls {
 
 struct root_impl_state {
   enum RootImplState state;
-  uint8_t variant;
 };
 
 struct root_impl {
   enum root_impls impl;
-  uint8_t variant;
 };
 
 #define LONGEST_ROOT_IMPL_NAME sizeof("KernelSU")

@@ -32,7 +32,7 @@ int parse_int(const char *str) {
   return val;
 }
 
-struct kernel_version parse_kversion() {
+struct kernel_version parse_kversion(void) {
   struct utsname uts;
   if (uname(&uts) == -1) {
     PLOGE("uname");
@@ -73,7 +73,9 @@ static struct maps_info *parse_maps_stream(FILE *fp) {
 
   char line[1024];
   while (fgets(line, sizeof(line), fp) != NULL) {
-    line[strlen(line) - 1] = '\0';
+    /* INFO: strcspn leaves the content intact when the last maps line has no
+              trailing newline, which strlen - 1 would corrupt. */
+    line[strcspn(line, "\n")] = '\0';
 
     uintptr_t start, end, offset;
     unsigned int dev_major, dev_minor;

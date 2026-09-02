@@ -47,45 +47,36 @@ bool switch_mount_namespace(pid_t pid) {
   return true;
 }
 
-void set_socket_create_context(const char *restrict context) {
-  FILE *sockcreate = fopen("/proc/thread-self/attr/sockcreate", "w");
+static bool write_sockcreate(const char *restrict path, const char *restrict context) {
+  FILE *sockcreate = fopen(path, "w");
   if (sockcreate == NULL) {
-    LOGE("Failed to open sockcreate with %d: %s. Retrying with tid.", errno, strerror(errno));
+    LOGE("Failed to open %s with %d: %s", path, errno, strerror(errno));
 
-    goto fail;
+    return false;
   }
 
   if (fwrite(context, 1, strlen(context), sockcreate) != strlen(context)) {
-    LOGE("Failed to write to sockcreate with %d: %s. Retrying with tid.", errno, strerror(errno));
+    LOGE("Failed to write to %s with %d: %s", path, errno, strerror(errno));
 
     fclose(sockcreate);
 
-    goto fail;
+    return false;
   }
 
   fclose(sockcreate);
 
-  return;
+  return true;
+}
 
-  fail:
-    ;
-    char path[PATH_MAX];
-    snprintf(path, PATH_MAX, "/proc/self/task/%d/attr/sockcreate", gettid());
+void set_socket_create_context(const char *restrict context) {
+  if (write_sockcreate("/proc/thread-self/attr/sockcreate", context)) return;
 
-    sockcreate = fopen(path, "w");
-    if (sockcreate == NULL) {
-      LOGE("Failed to open tid sockcreate with %d: %s", errno, strerror(errno));
+  /* INFO: thread-self can fail on very old kernels, so fall back to the
+            explicit task directory of this thread. */
+  char path[PATH_MAX];
+  snprintf(path, PATH_MAX, "/proc/self/task/%d/attr/sockcreate", gettid());
 
-      return;
-    }
-
-    if (fwrite(context, 1, strlen(context), sockcreate) != strlen(context)) {
-      LOGE("Failed to write to tid sockcreate with %d: %s", errno, strerror(errno));
-
-      return;
-    }
-
-    fclose(sockcreate);
+  write_sockcreate(path, context);
 }
 
 static bool get_current_attr(char *restrict output, size_t size) {
@@ -96,7 +87,7 @@ static bool get_current_attr(char *restrict output, size_t size) {
     return false;
   }
 
-  size_t ret = fread(output, 1, size, current);
+  size_t ret = fread(output, 1, size - 1, current);
   if (ferror(current)) {
     LOGE("fread: %s", strerror(errno));
 
@@ -142,8 +133,8 @@ void unix_datagram_sendto(const char *restrict path, const void *restrict buf, s
     goto restore;
   }
 
-  if (sendto(socket_fd, buf, len, 0, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
-    LOGE("sendto: %s", strerror(errno));
+  if (send(socket_fd, buf, len, 0) == -1) {
+    LOGE("send: %s", strerror(errno));
 
     close(socket_fd);
 
@@ -237,10 +228,13 @@ ssize_t write_fd(int fd, int sendfd) {
 int read_fd(int fd) {
   char cmsgbuf[CMSG_SPACE(sizeof(int))];
 
-  int cnt = 1;
+  /* INFO: The peer writes a single data byte with every descriptor, so the
+            payload sizes match on both ends of the exchange. */
+  char buf[1] = { 0 };
+
   struct iovec iov = {
-    .iov_base = &cnt,
-    .iov_len = sizeof(cnt)
+    .iov_base = buf,
+    .iov_len = sizeof(buf)
   };
 
   struct msghdr msg = {
@@ -473,40 +467,6 @@ bool check_unix_socket(int fd, bool block) {
   return pfd.revents & ~POLLIN ? false : true;
 }
 
-/* INFO: Cannot use restrict here as execv does not have restrict */
-int non_blocking_execv(const char *restrict file, char *const argv[]) {
-  int link[2];
-  pid_t pid;
-
-  if (pipe(link) == -1) {
-    LOGE("pipe: %s", strerror(errno));
-
-    return -1;
-  }
-
-  if ((pid = fork()) == -1) {
-    LOGE("fork: %s", strerror(errno));
-
-    return -1;
-  }
-
-  if (pid == 0) {
-    dup2(link[1], STDOUT_FILENO);
-    close(link[0]);
-    close(link[1]);
-
-    execv(file, argv);
-
-    _exit(1);
-  } else {
-    close(link[1]);
-
-    return link[0];
-  }
-
-  return -1;
-}
-
 void stringify_root_impl_name(struct root_impl impl, char *restrict output) {
   switch (impl.impl) {
     case KernelSU: {
@@ -517,21 +477,12 @@ void stringify_root_impl_name(struct root_impl impl, char *restrict output) {
   }
 }
 
+/* INFO: Only the fields consumed by umount_root are kept: the mount point
+         itself plus the source and root it matches against. */
 struct mountinfo {
-  unsigned int id;
-  unsigned int parent;
-  dev_t device;
   char *root;
   char *target;
-  char *vfs_option;
-  struct {
-      unsigned int shared;
-      unsigned int master;
-      unsigned int propagate_from;
-  } optional;
-  char *type;
   char *source;
-  char *fs_option;
 };
 
 struct mountinfos {
@@ -543,10 +494,7 @@ void free_mounts(struct mountinfos *restrict mounts) {
   for (size_t i = 0; i < mounts->length; i++) {
     free(mounts->mounts[i].root);
     free(mounts->mounts[i].target);
-    free(mounts->mounts[i].vfs_option);
-    free(mounts->mounts[i].type);
     free(mounts->mounts[i].source);
-    free(mounts->mounts[i].fs_option);
   }
 
   free(mounts->mounts);
@@ -572,27 +520,16 @@ bool parse_mountinfo(const char *restrict pid, struct mountinfos *restrict mount
   while (fgets(line, sizeof(line), mountinfo) != NULL) {
     int root_start = 0, root_end = 0;
     int target_start = 0, target_end = 0;
-    int vfs_option_start = 0, vfs_option_end = 0;
-    int type_start = 0, type_end = 0;
     int source_start = 0, source_end = 0;
-    int fs_option_start = 0, fs_option_end = 0;
-    int optional_start = 0, optional_end = 0;
-    unsigned int id, parent, maj, min;
     sscanf(line,
-      "%u "           /* INFO: id */
-      "%u "           /* INFO: parent id */
-      "%u:%u "        /* INFO: maj:min */
-      "%n%*s%n "      /* INFO: mountroot */
-      "%n%*s%n "      /* INFO:target */
-      "%n%*s%n"       /* INFO: vfs options (fs-independent) */
-      "%n%*[^-]%n - " /* INFO: optional fields */
-      "%n%*s%n "      /* INFO: FS type */
-      "%n%*s%n "      /* INFO: source */
-      "%n%*s%n",      /* INFO: fs options (fs specific) */
-      &id, &parent, &maj, &min, &root_start, &root_end, &target_start,
-      &target_end, &vfs_option_start, &vfs_option_end,
-      &optional_start, &optional_end, &type_start, &type_end,
-      &source_start, &source_end, &fs_option_start, &fs_option_end);
+      "%*u %*u %*u:%*u " /* mount id, parent id, maj:min */
+      "%n%*s%n "         /* root */
+      "%n%*s%n "         /* target */
+      "%*s%*[^-] - "     /* vfs options, optional fields, separator */
+      "%*s "             /* FS type */
+      "%n%*s%n",         /* source */
+      &root_start, &root_end, &target_start, &target_end,
+      &source_start, &source_end);
 
     struct mountinfo *tmp_mounts = (struct mountinfo *)realloc(mounts->mounts, (i + 1) * sizeof(struct mountinfo));
     if (!tmp_mounts) {
@@ -602,96 +539,44 @@ bool parse_mountinfo(const char *restrict pid, struct mountinfos *restrict mount
     }
     mounts->mounts = tmp_mounts;
 
-    unsigned int shared = 0;
-    unsigned int master = 0;
-    unsigned int propagate_from = 0;
-    if (strstr(line + optional_start, "shared:")) {
-      shared = (unsigned int)atoi(strstr(line + optional_start, "shared:") + 7);
-    }
+    /* INFO: Zeroed before filling so a failure partway through leaves a
+             freeable entry behind. */
+    struct mountinfo *mount = &mounts->mounts[i];
+    mount->root = NULL;
+    mount->target = NULL;
+    mount->source = NULL;
+    mounts->length = i + 1;
 
-    if (strstr(line + optional_start, "master:")) {
-      master = (unsigned int)atoi(strstr(line + optional_start, "master:") + 7);
-    }
+    mount->root = strndup(line + root_start, (size_t)(root_end - root_start));
+    mount->target = strndup(line + target_start, (size_t)(target_end - target_start));
+    mount->source = strndup(line + source_start, (size_t)(source_end - source_start));
 
-    if (strstr(line + optional_start, "propagate_from:")) {
-      propagate_from = (unsigned int)atoi(strstr(line + optional_start, "propagate_from:") + 15);
-    }
-
-    mounts->mounts[i].id = id;
-    mounts->mounts[i].parent = parent;
-    mounts->mounts[i].device = (dev_t)(makedev(maj, min));
-    mounts->mounts[i].root = strndup(line + root_start, (size_t)(root_end - root_start));
-    if (mounts->mounts[i].root == NULL) {
-      LOGE("Failed to allocate memory for root");
+    /* INFO: strndup only returns NULL on allocation failure. */
+    if (mount->root == NULL || mount->target == NULL || mount->source == NULL) {
+      LOGE("Failed to allocate memory for a mount entry");
 
       goto cleanup_mount_allocs;
     }
-    mounts->mounts[i].target = strndup(line + target_start, (size_t)(target_end - target_start));
-    if (mounts->mounts[i].target == NULL) {
-      LOGE("Failed to allocate memory for target");
-
-      goto cleanup_root;
-    }
-    mounts->mounts[i].vfs_option = strndup(line + vfs_option_start, (size_t)(vfs_option_end - vfs_option_start));
-    if (mounts->mounts[i].vfs_option == NULL) {
-      LOGE("Failed to allocate memory for vfs_option");
-
-      goto cleanup_target;
-    }
-    mounts->mounts[i].optional.shared = shared;
-    mounts->mounts[i].optional.master = master;
-    mounts->mounts[i].optional.propagate_from = propagate_from;
-    mounts->mounts[i].type = strndup(line + type_start, (size_t)(type_end - type_start));
-    if (mounts->mounts[i].type == NULL) {
-      LOGE("Failed to allocate memory for type");
-
-      goto cleanup_vfs_option;
-    }
-    mounts->mounts[i].source = strndup(line + source_start, (size_t)(source_end - source_start));
-    if (mounts->mounts[i].source == NULL) {
-      LOGE("Failed to allocate memory for source");
-
-      goto cleanup_type;
-    }
-    mounts->mounts[i].fs_option = strndup(line + fs_option_start, (size_t)(fs_option_end - fs_option_start));
-    if (mounts->mounts[i].fs_option == NULL) {
-      LOGE("Failed to allocate memory for fs_option");
-
-      goto cleanup_source;
-    }
 
     i++;
-
-    continue;
-
-    cleanup_source:
-      free(mounts->mounts[i].source);
-    cleanup_type:
-      free(mounts->mounts[i].type);
-    cleanup_vfs_option:
-      free(mounts->mounts[i].vfs_option);
-    cleanup_target:
-      free(mounts->mounts[i].target);
-    cleanup_root:
-      free(mounts->mounts[i].root);
-    cleanup_mount_allocs:
-      fclose(mountinfo);
-      free_mounts(mounts);
-
-      return false;
   }
 
   fclose(mountinfo);
 
-  mounts->length = i;
-
   return true;
+
+  cleanup_mount_allocs:
+    /* INFO: The length counts every allocated entry, so free_mounts
+             releases exactly what was built. */
+    free_mounts(mounts);
+    fclose(mountinfo);
+
+    return false;
 }
 
 bool umount_root(void) {
-  /* INFO: We are already in the target pid mount namespace, so actually,
-             when we use self here, we meant its pid.
-  */
+  /* INFO: This runs in a child that already setns'ed into the target pid's
+            mount namespace, so "self" here is the namespace to clean. */
   struct mountinfos mounts;
   if (!parse_mountinfo("self", &mounts)) {
     LOGE("Failed to parse mountinfo");
@@ -752,11 +637,11 @@ bool umount_root(void) {
 }
 
 int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
+  /* INFO: The clean namespace is requested for every denylisted process, so it
+            is cached for the daemon's lifetime instead of forked per process. */
   static int clean_namespace_fd = -1;
-  static int mounted_namespace_fd = -1;
 
   if (mns_state == Clean && clean_namespace_fd != -1) return clean_namespace_fd;
-  if (mns_state == Mounted && mounted_namespace_fd != -1) return mounted_namespace_fd;
 
   int sockets[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
@@ -873,11 +758,12 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
   if (waitpid(fork_pid, NULL, 0) == -1) {
     LOGE("waitpid: %s", strerror(errno));
 
+    close(ns_fd);
+
     return -1;
   }
 
-  if (mns_state == Clean) clean_namespace_fd = ns_fd;
-  else if (mns_state == Mounted) mounted_namespace_fd = ns_fd;
+  clean_namespace_fd = ns_fd;
 
   return ns_fd;
 }

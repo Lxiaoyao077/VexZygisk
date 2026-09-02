@@ -4,11 +4,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define PROCESS_NAME_MAX_LEN 256 + 1
+#define PROCESS_NAME_MAX_LEN (256 + 1)
 
 #define ZYGOTE_INJECTED LP_SELECT(5, 4)
 #define DAEMON_SET_INFO LP_SELECT(7, 6)
-#define DAEMON_SET_ERROR_INFO LP_SELECT(9, 8)
+
+/* INFO: Plain macros rather than a typed enum: 1u << 31 does not fit an int,
+         and a fixed underlying type is a C23 extension. */
+#define PROCESS_GRANTED_ROOT (1u << 0)
+#define PROCESS_ON_DENYLIST (1u << 1)
+#define PROCESS_IS_MANAGER (1u << 27)
+#define PROCESS_ROOT_IS_KSU (1u << 29)
+#define PROCESS_IS_FIRST_STARTED (1u << 31)
 
 enum DaemonSocketAction {
   ZygoteInjected         = 0,
@@ -24,14 +31,6 @@ enum DaemonSocketAction {
   SpawnZnCompanion       = 10
 };
 
-enum ProcessFlags: uint32_t {
-  PROCESS_GRANTED_ROOT = (1u << 0),
-  PROCESS_ON_DENYLIST = (1u << 1),
-  PROCESS_IS_MANAGER = (1u << 27),
-  PROCESS_ROOT_IS_KSU = (1u << 29),
-  PROCESS_IS_FIRST_STARTED = (1u << 31)
-};
-
 enum RootImplState {
   Supported,
   TooOld,
@@ -39,9 +38,10 @@ enum RootImplState {
   Abnormal
 };
 
+/* INFO: The loader only ever asks for the clean namespace, so no other state
+         is carried over the protocol. */
 enum MountNamespaceState {
-  Clean,
-  Mounted
+  Clean
 };
 
 #endif /* CONSTANTS_H */

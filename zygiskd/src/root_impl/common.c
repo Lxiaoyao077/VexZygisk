@@ -4,23 +4,25 @@
 #include "kernelsu.h"
 
 static struct root_impl impl;
+static bool impl_supported = false;
 
 void root_impls_setup(void) {
   struct root_impl_state state_ksu;
   ksu_get_existence(&state_ksu);
 
-  if (state_ksu.state == Supported) {
-    impl.impl = KernelSU;
-    impl.variant = state_ksu.variant;
+  /* INFO: The daemon is a KernelSU module, so a missing interface only means
+            it is running somewhere it cannot serve; keep serving requests that
+            do not need root instead of failing to start. */
+  if (state_ksu.state != Supported) {
+    LOGW("No supported root implementation found.");
+
+    return;
   }
 
-  switch (impl.impl) {
-    case KernelSU: {
-      LOGI("KernelSU root implementation found.\n");
+  impl.impl = KernelSU;
+  impl_supported = true;
 
-      break;
-    }
-  }
+  LOGI("KernelSU root implementation found.");
 }
 
 void get_impl(struct root_impl *uimpl) {
@@ -28,35 +30,23 @@ void get_impl(struct root_impl *uimpl) {
 }
 
 bool uid_granted_root(uid_t uid) {
-  switch (impl.impl) {
-    case KernelSU: {
-      return ksu_uid_granted_root(uid);
-    }
-  }
+  if (!impl_supported) return false;
 
-  return false;
+  return ksu_uid_granted_root(uid);
 }
 
 bool uid_should_umount(uid_t uid) {
-  switch (impl.impl) {
-    case KernelSU: {
-      return ksu_uid_should_umount(uid);
-    }
-  }
+  if (!impl_supported) return false;
 
-  return false;
+  return ksu_uid_should_umount(uid);
 }
 
 bool uid_is_manager(uid_t uid) {
-  switch (impl.impl) {
-    case KernelSU: {
-      return ksu_uid_is_manager(uid);
-    }
-  }
+  if (!impl_supported) return false;
 
-  return false;
+  return ksu_uid_is_manager(uid);
 }
 
 void root_impl_cleanup(void) {
-  if (impl.impl == KernelSU) ksu_cleanup();
+  if (impl_supported) ksu_cleanup();
 }

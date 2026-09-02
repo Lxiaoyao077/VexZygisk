@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <limits.h>
+
+#include <signal.h>
+
 #include "daemon.h"
 #include "monitor.h"
 
@@ -25,9 +29,18 @@ int main(int argc, char **argv) {
                  so we just delay for Tango Zygote. */
       if (do_restart && !is_tango) rezygiskd_zygote_restart();
 
-      long pid = strtol(argv[2], 0, 0);
-      if (!trace_zygote(pid, is_tango)) {
-        kill(pid, SIGKILL);
+      /* INFO: Validated before use: a bogus pid would otherwise reach the
+                kill() below as 0, which signals the whole process group. */
+      char *pid_end = NULL;
+      long pid = strtol(argv[2], &pid_end, 0);
+      if (pid <= 0 || pid > INT_MAX || pid_end == argv[2] || *pid_end != '\0') {
+        printf("[VexZygisk]: Invalid pid \"%s\"\n", argv[2]);
+
+        return 1;
+      }
+
+      if (!trace_zygote((int)pid, is_tango)) {
+        kill((pid_t)pid, SIGKILL);
 
         return 1;
       }
@@ -35,7 +48,7 @@ int main(int argc, char **argv) {
       if (do_restart && is_tango) rezygiskd_zygote_restart();
 
       return 0;
-  } else if (argc >= 2 && strcmp(argv[1], "ctl") == 0) {
+  } else if (argc >= 3 && strcmp(argv[1], "ctl") == 0) {
     enum rezygiskd_command command;
 
     if (strcmp(argv[2], "start") == 0) command = START;
@@ -57,12 +70,18 @@ int main(int argc, char **argv) {
 
     return 0;
   } else if (argc >= 2 && strcmp(argv[1], "version") == 0) {
-    /* INFO: Noop*/
+    printf("[VexZygisk]: %s\n", ZKSU_VERSION);
 
     return 0;
   } else if (argc >= 2 && strcmp(argv[1], "info") == 0) {
-    struct rezygisk_info info;
+    struct rezygisk_info info = { 0 };
     rezygiskd_get_info(&info);
+
+    if (!info.running) {
+      printf("[VexZygisk]: The daemon is not running\n");
+
+      return 1;
+    }
 
     printf("Daemon process PID: %d\n", info.pid);
 
@@ -91,7 +110,7 @@ int main(int argc, char **argv) {
     printf(
       "Available commands:\n"
       " - monitor\n"
-      " - trace <pid> [--restart]\n"
+      " - trace <pid> [--restart] [--tango]\n"
       " - ctl <start|stop|exit>\n"
       " - version: Shows the version of VexZygisk.\n"
       " - info: Shows information about the created daemon/injection.\n"

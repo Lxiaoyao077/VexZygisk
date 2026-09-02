@@ -19,7 +19,7 @@
 #ifdef __aarch64__
   /* INFO: In ARM64, we clear the following registers:
              NEON: q0, q1, ..., q7 
-             GPR : x6, x7, x11, x12, x13, x14
+             GPR : x6, x7, x11, x12, x13, x14, x15, x16, x17
   */
   __attribute__((always_inline))
   static inline void registers_clear(void) {

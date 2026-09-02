@@ -15,9 +15,9 @@
 
 #include "elf_util.h"
 
-#include "LzmaDec.h"
+#include "elf_util.h"
 
-#define SHT_GNU_HASH 0x6ffffff6
+#include "LzmaDec.h"
 
 /* INFO: Mini-debug info (.gnu_debugdata) support. The section carries an
           LZMA1 "alone" stream that decompresses into a small ELF holding a
@@ -134,7 +134,9 @@ static bool parse_gnu_debugdata(ElfImg *img, const uint8_t *data, size_t size) {
   return false;
 }
 
-uint32_t ElfHash(const char *name) {
+/* INFO: Everything below is internal to the ELF reader; keeping the symbols
+         static avoids exporting them from the injected library. */
+static uint32_t ElfHash(const char *name) {
   uint32_t h = 0, g = 0;
 
   while (*name) {
@@ -151,7 +153,7 @@ uint32_t ElfHash(const char *name) {
   return h;
 }
 
-uint32_t GnuHash(const char *name) {
+static uint32_t GnuHash(const char *name) {
   uint32_t h = 5381;
 
   while (*name) {
@@ -161,23 +163,23 @@ uint32_t GnuHash(const char *name) {
   return h;
 }
 
-ElfW(Shdr) *offsetOf_Shdr(ElfW(Ehdr) *head, ElfW(Off) off) {
+static ElfW(Shdr) *offsetOf_Shdr(ElfW(Ehdr) *head, ElfW(Off) off) {
   return (ElfW(Shdr) *)(((uintptr_t)head) + off);
 }
 
-char *offsetOf_char(ElfW(Ehdr) *head, ElfW(Off) off) {
+static char *offsetOf_char(ElfW(Ehdr) *head, ElfW(Off) off) {
   return (char *)(((uintptr_t)head) + off);
 }
 
-ElfW(Sym) *offsetOf_Sym(ElfW(Ehdr) *head, ElfW(Off) off) {
+static ElfW(Sym) *offsetOf_Sym(ElfW(Ehdr) *head, ElfW(Off) off) {
   return (ElfW(Sym) *)(((uintptr_t)head) + off);
 }
 
-ElfW(Word) *offsetOf_Word(ElfW(Ehdr) *head, ElfW(Off) off) {
+static ElfW(Word) *offsetOf_Word(ElfW(Ehdr) *head, ElfW(Off) off) {
   return (ElfW(Word) *)(((uintptr_t)head) + off);
 }
 
-int dl_cb(struct dl_phdr_info *info, size_t size, void *data) {
+static int dl_cb(struct dl_phdr_info *info, size_t size, void *data) {
   (void) size;
 
   if (info->dlpi_name == NULL)
@@ -194,13 +196,13 @@ int dl_cb(struct dl_phdr_info *info, size_t size, void *data) {
   return 0;
 }
 
-bool _find_module_base(ElfImg *img) {
+static bool _find_module_base(ElfImg *img) {
   dl_iterate_phdr(dl_cb, img);
 
   return img->base != NULL;
 }
 
-size_t calculate_valid_symtabs_amount(ElfImg *img) {
+static size_t calculate_valid_symtabs_amount(ElfImg *img) {
   size_t count = 0;
 
   bool has_file_symtab = img->symtab_start != NULL && img->symstr_offset_for_symtab != 0;
@@ -560,7 +562,7 @@ ElfImg *ElfImg_create(const char *elf, void *base) {
   return img;
 }
 
-bool _load_symtabs(ElfImg *img);
+static bool _load_symtabs(ElfImg *img);
 
 bool ElfImg_load_symbols(ElfImg *img) {
   return _load_symtabs(img);
@@ -584,7 +586,7 @@ const char *getSymbName(ElfImg *img, ElfW(Sym) *sym) {
   return (const char *)(offsetOf_char(img->header, img->symstr_offset_for_symtab) + sym->st_name);
 }
 
-bool _load_symtabs(ElfImg *img) {
+static bool _load_symtabs(ElfImg *img) {
   if (img->symtabs_) return true;
 
   bool has_file_symtab = img->symtab_start != NULL && img->symstr_offset_for_symtab != 0 && img->symtab_count > 0;
@@ -674,10 +676,8 @@ ElfW(Addr) GnuLookup(ElfImg *restrict img, const char *name, uint32_t hash, unsi
                    ((uintptr_t)1 << ((hash >> img->gnu_shift2_) % bloom_mask_bits));
 
   if ((mask & bloom_word) != mask) {
-    /* INFO: Very loggy -- generates too much noise. GNU is rarely used for Zygisk context. */
-    /* LOGW("Symbol '%s' (hash %u) filtered out by GNU Bloom Filter (idx %zu, mask 0x%lx, word 0x%lx)",
-           name, hash, bloom_idx, (unsigned long)mask, (unsigned long)bloom_word);
-    */
+    /* INFO: Bloom-filter misses are expected for names that are not exported;
+              logging each one would be pure noise. */
 
     return 0;
   }
@@ -744,13 +744,28 @@ ElfW(Addr) GnuLookup(ElfImg *restrict img, const char *name, uint32_t hash, unsi
 }
 
 ElfW(Addr) ElfLookup(ElfImg *restrict img, const char *restrict name, uint32_t hash, unsigned char *sym_type) {
-  if (img->nbucket_ == 0 || !img->bucket_ || !img->chain_ || !img->dynsym_start || !img->strtab_start)
+  if (img->nbucket_ == 0 || !img->bucket_ || !img->chain_ || !img->dynsym_start || !img->strtab_start || !img->dynsym || !img->strtab)
     return 0;
 
   char *strings = (char *)img->strtab_start;
+  ElfW(Word) dynsym_count = img->dynsym->sh_size / img->dynsym->sh_entsize;
 
+  /* INFO: The chain table has one entry per dynamic symbol, so dynsym_count
+            bounds both walks, mirroring the checks in GnuLookup. */
   for (size_t n = img->bucket_[hash % img->nbucket_]; n != STN_UNDEF; n = img->chain_[n]) {
+    if (n >= dynsym_count) {
+      LOGE("Symbol index %zu out of bounds", n);
+
+      break;
+    }
+
     ElfW(Sym) *sym = img->dynsym_start + n;
+
+    if (sym->st_name >= img->strtab->sh_size) {
+      LOGE("Symbol name offset %u out of bounds", sym->st_name);
+
+      break;
+    }
 
     if (strcmp(name, strings + sym->st_name) == 0 && sym->st_shndx != SHN_UNDEF) {
       unsigned int type = ELF_ST_TYPE(sym->st_info);
@@ -765,12 +780,6 @@ ElfW(Addr) ElfLookup(ElfImg *restrict img, const char *restrict name, uint32_t h
 
 ElfW(Addr) LinearLookup(ElfImg *img, const char *restrict name, unsigned char *sym_type) {
   if (!_load_symtabs(img)) return 0;
-
-  if (img->symtabs_count_ == 0) {
-    LOGW("No valid symbols (FUNC/OBJECT with size > 0) found in .symtab for %s", img->elf);
-
-    return 0;
-  }
 
   for (size_t i = 0; i < img->symtabs_count_; i++) {
     ElfW(Sym) *sym = img->symtabs_[i];
@@ -789,9 +798,7 @@ ElfW(Addr) LinearLookup(ElfImg *img, const char *restrict name, unsigned char *s
 }
 
 static ElfW(Addr) getSymbOffset(ElfImg *img, const char *name, unsigned char *sym_type) {
-  ElfW(Addr) offset = 0;
-
-  offset = GnuLookup(img, name, GnuHash(name), sym_type);
+  ElfW(Addr) offset = GnuLookup(img, name, GnuHash(name), sym_type);
   if (offset != 0) return offset;
 
   offset = ElfLookup(img, name, ElfHash(name), sym_type);

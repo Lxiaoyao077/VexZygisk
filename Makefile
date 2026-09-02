@@ -34,7 +34,7 @@ MODULE_INPUTS = scripts/sign.py \
         $(shell find module/src -type f | sort) \
         $(wildcard module/private_key module/public_key)
 
-.PHONY: debug release build clean          \
+.PHONY: debug release all build clean          \
         installKsu installKsuAndReboot
 
 debug:

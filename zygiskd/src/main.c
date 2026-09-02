@@ -23,9 +23,7 @@ int main(int argc, char *argv[]) {
       companion_entry(fd);
 
       return 0;
-    }
-
-    else if (strcmp(argv[1], "zn-companion") == 0) {
+    } else if (strcmp(argv[1], "zn-companion") == 0) {
       if (argc < 3) {
         LOGI("Usage: zygiskd zn-companion <fd>");
 
@@ -36,15 +34,11 @@ int main(int argc, char *argv[]) {
       zn_companion_entry(fd);
 
       return 0;
-    }
-
-    else if (strcmp(argv[1], "version") == 0) {
+    } else if (strcmp(argv[1], "version") == 0) {
       LOGI("VexZygisk Daemon %s", ZKSU_VERSION);
 
       return 0;
-    }
-
-    else if (strcmp(argv[1], "root") == 0) {
+    } else if (strcmp(argv[1], "root") == 0) {
       root_impls_setup();
 
       struct root_impl impl;
@@ -56,9 +50,7 @@ int main(int argc, char *argv[]) {
       LOGI("Root implementation: %s", impl_name);
 
       return 0;
-    }
-
-    else {
+    } else {
       LOGI("Usage: zygiskd [companion|zn-companion|version|root]");
 
       return 0;

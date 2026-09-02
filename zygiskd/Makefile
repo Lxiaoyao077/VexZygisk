@@ -9,7 +9,7 @@ OBJ_DIR = $(OBJ_ROOT)/$(ARCH)
 ZKSU_VERSION ?= $(VER_NAME)
 
 ifeq ($(BUILD_TYPE),release)
-	TYPE_CFLAGS = -O3 -ffast-math -flto
+	TYPE_CFLAGS = -O3 -flto
 	TYPE_LDFLAGS = -Wl,--strip-all -flto
 else
 	TYPE_CFLAGS = -g -O0 -DDEBUG
@@ -18,10 +18,8 @@ endif
 
 ZYGISKD_CFLAGS = -D_GNU_SOURCE -std=c99 -Wpedantic -Wall -Wextra -Werror  \
 			 	 -Wformat -Wuninitialized -Wshadow -Wno-zero-length-array \
-			 	 -Wno-fixed-enum-extension -Wno-unknown-warning-option    \
-				 -Wno-c23-extensions -Wconversion                         \
-				 -DMIN_KSU_VERSION=$(MIN_KSU_VERSION)                     \
-				 '-DZKSU_VERSION="$(ZKSU_VERSION)"'
+			 	 -Wno-unknown-warning-option -Wconversion                 \
+			 	 '-DZKSU_VERSION="$(ZKSU_VERSION)"'
 
 SRCS = src/root_impl/common.c      \
 	   src/root_impl/kernelsu.c    \

@@ -51,8 +51,9 @@ LIBPTRACE_STRIPPED = $(OBJ_DIR)/stripped/libzygisk_ptrace.so
 PLTI_DIR = src/external/plti
 CSOLOADER_DIR = src/external/csoloader
 DOBBY_DIR = src/external/dobby
+LZMA_DIR = src/external/lzma
 
-COMMON_INCLUDES = -Isrc/include
+COMMON_INCLUDES = -Isrc/include -I$(LZMA_DIR)
 INJECTOR_INCLUDES = -Isrc/include -I$(PLTI_DIR)/src -I$(CSOLOADER_DIR)/include -I$(DOBBY_DIR)/include
 
 # INFO: Dobby is C++ and ships no Makefile, so its sources are compiled here
@@ -175,7 +176,15 @@ $(OBJ_DIR)/ptracer/%.o: src/ptracer/%.c
 	$(CC_ARCH) $(NDK_CFLAGS) $(LOADER_CFLAGS) $(TYPE_CFLAGS) \
 		$(COMMON_INCLUDES) -fPIE -c $< -o $@
 
-$(LIBCOMMON): $(COMMON_OBJS)
+LZMA_OBJ = $(OBJ_DIR)/external/lzma/LzmaDec.o
+
+$(LZMA_OBJ): $(LZMA_DIR)/LzmaDec.c
+	@mkdir -p $(dir $@)
+	$(CC_ARCH) $(NDK_CFLAGS) -D_GNU_SOURCE -std=c11 -fno-stack-protector  \
+		-fomit-frame-pointer -Wno-unused -Wno-sign-compare -DNDEBUG       \
+		$(COMMON_INCLUDES) -fPIC -c $< -o $@
+
+$(LIBCOMMON): $(COMMON_OBJS) $(LZMA_OBJ)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 

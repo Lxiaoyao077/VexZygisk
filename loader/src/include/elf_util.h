@@ -46,6 +46,15 @@ typedef struct {
   ElfW(Sym) *symtab_start;
   ElfW(Off) symstr_offset_for_symtab;
 
+  /* INFO: Mini-debug info (.gnu_debugdata): an LZMA-compressed ELF holding a
+            full .symtab for otherwise stripped system libraries. */
+  uint8_t *debugdata;
+  size_t debugdata_size;
+  ElfW(Sym) *dd_symtab_start;
+  size_t dd_symtab_count;
+  const char *dd_strtab;
+  size_t dd_strtab_size;
+
   ElfW(Sym) **symtabs_;
   size_t symtabs_count_;
 } ElfImg;

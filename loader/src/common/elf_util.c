@@ -15,7 +15,124 @@
 
 #include "elf_util.h"
 
+#include "LzmaDec.h"
+
 #define SHT_GNU_HASH 0x6ffffff6
+
+/* INFO: Mini-debug info (.gnu_debugdata) support. The section carries an
+          LZMA1 "alone" stream that decompresses into a small ELF holding a
+          full .symtab for otherwise stripped libraries. */
+
+static void *lzma_alloc(ISzAllocPtr p, size_t size) {
+  (void) p;
+
+  return malloc(size);
+}
+
+static void lzma_free(ISzAllocPtr p, void *addr) {
+  (void) p;
+
+  free(addr);
+}
+
+static const ISzAlloc lzma_alloc_vt = { lzma_alloc, lzma_free };
+
+/* INFO: Stream layout: props (1 byte) + dict size (4 bytes LE) +
+          uncompressed size (8 bytes LE) + payload. */
+static bool lzma_alone_decompress(const uint8_t *in, size_t in_size, uint8_t **out_buf, size_t *out_size) {
+  if (in_size < 13) return false;
+
+  uint64_t expected = 0;
+  for (int i = 0; i < 8; i++) expected |= (uint64_t)in[5 + i] << (8 * i);
+
+  /* INFO: 64 MiB is far above any real mini-debug payload and keeps a
+            corrupted header from turning into a huge allocation. */
+  if (expected == 0 || expected == UINT64_MAX || expected > (64u << 20)) return false;
+
+  uint8_t *out = (uint8_t *)malloc(expected);
+  if (!out) return false;
+
+  SizeT dest_len = (SizeT)expected;
+  SizeT src_len = (SizeT)(in_size - 13);
+  ELzmaStatus status;
+
+  SRes res = LzmaDecode(out, &dest_len, in + 13, &src_len, (const Byte *)in, 5,
+                        LZMA_FINISH_END, &status, &lzma_alloc_vt);
+
+  if (res != SZ_OK) {
+    free(out);
+
+    return false;
+  }
+
+  *out_buf = out;
+  *out_size = dest_len;
+
+  return true;
+}
+
+static bool parse_gnu_debugdata(ElfImg *img, const uint8_t *data, size_t size) {
+  /* INFO: Android prepends a 4-byte CRC32 before the LZMA stream while the
+            GNU toolchain emits the raw stream, so both layouts are tried. */
+  static const size_t kOffsets[] = { 4, 0 };
+
+  for (size_t i = 0; i < sizeof(kOffsets) / sizeof(kOffsets[0]); i++) {
+    size_t off = kOffsets[i];
+    if (size <= off + 13) continue;
+
+    uint8_t *out = NULL;
+    size_t out_size = 0;
+    if (!lzma_alone_decompress(data + off, size - off, &out, &out_size)) continue;
+    if (out_size < sizeof(ElfW(Ehdr)) || memcmp(out, ELFMAG, SELFMAG) != 0) {
+      free(out);
+
+      continue;
+    }
+
+    ElfW(Ehdr) *deh = (ElfW(Ehdr) *)out;
+    if (deh->e_shoff == 0 || deh->e_shnum == 0 || deh->e_shentsize == 0 ||
+        (size_t)deh->e_shoff + (size_t)deh->e_shnum * deh->e_shentsize > out_size) {
+      free(out);
+
+      continue;
+    }
+
+    ElfW(Shdr) *dshdrs = (ElfW(Shdr) *)(out + deh->e_shoff);
+
+    for (unsigned int j = 0; j < deh->e_shnum; j++) {
+      ElfW(Shdr) *sh = &dshdrs[j];
+      if (sh->sh_type != SHT_SYMTAB || sh->sh_link >= deh->e_shnum) continue;
+
+      ElfW(Shdr) *str_sh = &dshdrs[sh->sh_link];
+      if ((size_t)sh->sh_offset + sh->sh_size > out_size) continue;
+      if ((size_t)str_sh->sh_offset + str_sh->sh_size > out_size) continue;
+
+      img->dd_symtab_start = (ElfW(Sym) *)(out + sh->sh_offset);
+      img->dd_symtab_count = sh->sh_entsize ? sh->sh_size / sh->sh_entsize : 0;
+      img->dd_strtab = (const char *)(out + str_sh->sh_offset);
+      img->dd_strtab_size = str_sh->sh_size;
+
+      break;
+    }
+
+    if (img->dd_symtab_start && img->dd_symtab_count > 0) {
+      img->debugdata = out;
+      img->debugdata_size = out_size;
+
+      LOGD("Loaded %zu mini-debug symbols from .gnu_debugdata of %s", img->dd_symtab_count, img->elf);
+
+      return true;
+    }
+
+    img->dd_symtab_start = NULL;
+    img->dd_symtab_count = 0;
+    img->dd_strtab = NULL;
+    img->dd_strtab_size = 0;
+    free(out);
+  }
+
+  return false;
+}
 
 uint32_t ElfHash(const char *name) {
   uint32_t h = 0, g = 0;
@@ -86,17 +203,18 @@ bool _find_module_base(ElfImg *img) {
 size_t calculate_valid_symtabs_amount(ElfImg *img) {
   size_t count = 0;
 
-  if (img->symtab_start == NULL || img->symstr_offset_for_symtab == 0) {
-    LOGE("Invalid symtab_start or symstr_offset_for_symtab, cannot count valid symbols");
+  bool has_file_symtab = img->symtab_start != NULL && img->symstr_offset_for_symtab != 0;
+  if (!has_file_symtab && img->dd_symtab_start == NULL) {
+    LOGE("No .symtab and no mini-debug symbols available, cannot count valid symbols");
 
     return 0;
   }
 
   ElfW(Shdr) *symtab_str_shdr = NULL;
-  if (img->symtab && img->section_header && img->symtab->sh_link < img->header->e_shnum)
+  if (has_file_symtab && img->symtab && img->section_header && img->symtab->sh_link < img->header->e_shnum)
     symtab_str_shdr = img->section_header + img->symtab->sh_link;
 
-  for (ElfW(Off) i = 0; i < img->symtab_count; i++) {
+  if (has_file_symtab) for (ElfW(Off) i = 0; i < img->symtab_count; i++) {
     if (symtab_str_shdr && img->symtab_start[i].st_name >= symtab_str_shdr->sh_size) {
       LOGW("Symbol %zu has invalid name offset %u (>= %zu), skipping", (size_t)i, img->symtab_start[i].st_name, (size_t)symtab_str_shdr->sh_size);
 
@@ -105,6 +223,13 @@ size_t calculate_valid_symtabs_amount(ElfImg *img) {
 
     unsigned int st_type = ELF_ST_TYPE(img->symtab_start[i].st_info);
     if ((st_type == STT_FUNC || st_type == STT_OBJECT) && img->symtab_start[i].st_size > 0 && img->symtab_start[i].st_name != 0)
+      count++;
+  }
+
+  if (img->dd_symtab_start) for (size_t i = 0; i < img->dd_symtab_count; i++) {
+    unsigned int st_type = ELF_ST_TYPE(img->dd_symtab_start[i].st_info);
+    if ((st_type == STT_FUNC || st_type == STT_OBJECT) && img->dd_symtab_start[i].st_size > 0 &&
+        img->dd_symtab_start[i].st_name != 0 && img->dd_symtab_start[i].st_name < img->dd_strtab_size)
       count++;
   }
 
@@ -117,6 +242,11 @@ void ElfImg_destroy(ElfImg *img) {
   if (img->symtabs_) {
     free(img->symtabs_);
     img->symtabs_ = NULL;
+  }
+
+  if (img->debugdata) {
+    free(img->debugdata);
+    img->debugdata = NULL;
   }
 
   if (img->elf) {
@@ -277,7 +407,14 @@ ElfImg *ElfImg_create(const char *elf, void *base) {
           break;
         }
         case SHT_STRTAB: break;
-        case SHT_PROGBITS: break;
+        case SHT_PROGBITS: {
+          if (section_str && strcmp(sname, ".gnu_debugdata") == 0 &&
+              (size_t)section_h->sh_offset + section_h->sh_size <= img->size) {
+            parse_gnu_debugdata(img, (const uint8_t *)offsetOf_char(img->header, section_h->sh_offset), section_h->sh_size);
+          }
+
+          break;
+        }
         case SHT_HASH: {
           ElfW(Word) *d_un = offsetOf_Word(img->header, section_h->sh_offset);
 
@@ -430,7 +567,19 @@ bool ElfImg_load_symbols(ElfImg *img) {
 }
 
 const char *getSymbName(ElfImg *img, ElfW(Sym) *sym) {
-  if (img == NULL || sym == NULL || img->symstr_offset_for_symtab == 0) return NULL;
+  if (img == NULL || sym == NULL) return NULL;
+
+  /* INFO: Symbols coming from the mini-debug table resolve against the
+            decompressed buffer's own string table. */
+  if (img->dd_symtab_start != NULL &&
+      (uintptr_t)sym >= (uintptr_t)img->dd_symtab_start &&
+      (uintptr_t)sym < (uintptr_t)img->dd_symtab_start + img->dd_symtab_count * sizeof(ElfW(Sym))) {
+    if (sym->st_name >= img->dd_strtab_size) return NULL;
+
+    return img->dd_strtab + sym->st_name;
+  }
+
+  if (img->symstr_offset_for_symtab == 0) return NULL;
 
   return (const char *)(offsetOf_char(img->header, img->symstr_offset_for_symtab) + sym->st_name);
 }
@@ -438,7 +587,9 @@ const char *getSymbName(ElfImg *img, ElfW(Sym) *sym) {
 bool _load_symtabs(ElfImg *img) {
   if (img->symtabs_) return true;
 
-  if (!img->symtab_start || img->symstr_offset_for_symtab == 0 || img->symtab_count == 0) return false;
+  bool has_file_symtab = img->symtab_start != NULL && img->symstr_offset_for_symtab != 0 && img->symtab_count > 0;
+  bool has_dd_symtab = img->dd_symtab_start != NULL && img->dd_symtab_count > 0;
+  if (!has_file_symtab && !has_dd_symtab) return false;
 
   img->symtabs_count_ = calculate_valid_symtabs_amount(img);
   if (img->symtabs_count_ == 0) {
@@ -454,31 +605,59 @@ bool _load_symtabs(ElfImg *img) {
     return false;
   }
 
-  char *symtab_strings = offsetOf_char(img->header, img->symstr_offset_for_symtab);
   size_t current_valid_index = 0;
 
-  for (ElfW(Off) pos = 0; pos < img->symtab_count; pos++) {
-    ElfW(Sym) *current_sym = &img->symtab_start[pos];
+  if (has_file_symtab) {
+    char *symtab_strings = offsetOf_char(img->header, img->symstr_offset_for_symtab);
+    ElfW(Shdr) *symtab_str_shdr = (img->symtab && img->section_header && img->symtab->sh_link < img->header->e_shnum)
+                                  ? img->section_header + img->symtab->sh_link
+                                  : NULL;
+
+    for (ElfW(Off) pos = 0; pos < img->symtab_count; pos++) {
+      ElfW(Sym) *current_sym = &img->symtab_start[pos];
+      unsigned int st_type = ELF_ST_TYPE(current_sym->st_info);
+
+      if ((st_type == STT_FUNC || st_type == STT_OBJECT) && current_sym->st_size > 0 && current_sym->st_name != 0) {
+        const char *st_name = symtab_strings + current_sym->st_name;
+        if (!st_name)
+          continue;
+
+        if (symtab_str_shdr && current_sym->st_name >= symtab_str_shdr->sh_size) {
+          LOGE("Symbol name offset out of bounds");
+
+          continue;
+        }
+
+        img->symtabs_[current_valid_index] = current_sym;
+
+        current_valid_index++;
+        if (current_valid_index == img->symtabs_count_) break;
+      }
+    }
+  }
+
+  if (has_dd_symtab) for (size_t pos = 0; pos < img->dd_symtab_count && current_valid_index < img->symtabs_count_; pos++) {
+    ElfW(Sym) *current_sym = &img->dd_symtab_start[pos];
     unsigned int st_type = ELF_ST_TYPE(current_sym->st_info);
 
-    if ((st_type == STT_FUNC || st_type == STT_OBJECT) && current_sym->st_size > 0 && current_sym->st_name != 0) {
-      const char *st_name = symtab_strings + current_sym->st_name;
-      if (!st_name)
-        continue;
-
-      ElfW(Shdr) *symtab_str_shdr = img->section_header + img->symtab->sh_link;
-      if (current_sym->st_name >= symtab_str_shdr->sh_size) {
-        LOGE("Symbol name offset out of bounds");
-
-        continue;
-      }
-
+    if ((st_type == STT_FUNC || st_type == STT_OBJECT) && current_sym->st_size > 0 &&
+        current_sym->st_name != 0 && current_sym->st_name < img->dd_strtab_size &&
+        current_sym->st_shndx != SHN_UNDEF) {
       img->symtabs_[current_valid_index] = current_sym;
 
       current_valid_index++;
-      if (current_valid_index == img->symtabs_count_) break;
     }
   }
+
+  if (current_valid_index == 0) {
+    free(img->symtabs_);
+    img->symtabs_ = NULL;
+    img->symtabs_count_ = 0;
+
+    return false;
+  }
+
+  img->symtabs_count_ = current_valid_index;
 
   return true;
 }
@@ -596,8 +775,8 @@ ElfW(Addr) LinearLookup(ElfImg *img, const char *restrict name, unsigned char *s
   for (size_t i = 0; i < img->symtabs_count_; i++) {
     ElfW(Sym) *sym = img->symtabs_[i];
 
-    const char *sym_name = offsetOf_char(img->header, img->symstr_offset_for_symtab) + sym->st_name;
-    if (sym->st_shndx == SHN_UNDEF || strcmp(name, sym_name) != 0)
+    const char *sym_name = getSymbName(img, sym);
+    if (sym_name == NULL || sym->st_shndx == SHN_UNDEF || strcmp(name, sym_name) != 0)
       continue;
 
     unsigned int type = ELF_ST_TYPE(sym->st_info);

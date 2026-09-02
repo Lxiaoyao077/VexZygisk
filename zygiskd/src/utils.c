@@ -47,12 +47,6 @@ bool switch_mount_namespace(pid_t pid) {
   return true;
 }
 
-int __system_property_get(const char *, char *);
-
-void get_property(const char *restrict name, char *restrict output) {
-  __system_property_get(name, output);
-}
-
 void set_socket_create_context(const char *restrict context) {
   FILE *sockcreate = fopen("/proc/thread-self/attr/sockcreate", "w");
   if (sockcreate == NULL) {
@@ -137,9 +131,7 @@ void unix_datagram_sendto(const char *restrict path, const void *restrict buf, s
   if (socket_fd == -1) {
     LOGE("socket: %s", strerror(errno));
 
-    set_socket_create_context("u:r:zygote:s0");
-
-    return;
+    goto restore;
   }
 
   if (connect(socket_fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
@@ -147,9 +139,7 @@ void unix_datagram_sendto(const char *restrict path, const void *restrict buf, s
 
     close(socket_fd);
 
-    set_socket_create_context("u:r:zygote:s0");
-
-    return;
+    goto restore;
   }
 
   if (sendto(socket_fd, buf, len, 0, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
@@ -157,14 +147,13 @@ void unix_datagram_sendto(const char *restrict path, const void *restrict buf, s
 
     close(socket_fd);
 
-    set_socket_create_context("u:r:zygote:s0");
-
-    return;
+    goto restore;
   }
 
-  set_socket_create_context("u:r:zygote:s0");
-
   close(socket_fd);
+
+  restore:
+    set_socket_create_context("u:r:zygote:s0");
 }
 
 int chcon(const char *restrict path, const char *context) {
@@ -462,57 +451,9 @@ ssize_t read_string(int fd, char *restrict buf, size_t buf_size) {
     return -1;
   }
 
-  if (str_len > 0) buf[str_len] = '\0';
+  buf[str_len] = '\0';
 
   return read_bytes;
-}
-
-/* INFO: Cannot use restrict here as execv does not have restrict */
-bool exec_command(char *restrict buf, size_t len, const char *restrict file, const char *const argv[]) {
-  int link[2];
-  pid_t pid;
-
-  if (pipe(link) == -1) {
-    LOGE("pipe: %s", strerror(errno));
-
-    return false;
-  }
-
-  if ((pid = fork()) == -1) {
-    LOGE("fork: %s", strerror(errno));
-
-    close(link[0]);
-    close(link[1]);
-
-    return false;
-  }
-
-  if (pid == 0) {
-    dup2(link[1], STDOUT_FILENO);
-    close(link[0]);
-    close(link[1]);
-
-    /* NOTE: Sonarlint complains about a const qualifier drop here (c:S859),
-               but this cast is deliberate and unavoidable.
-    */
-    execv(file, (char *const *)argv);
-
-    LOGE("execv failed: %s", strerror(errno));
-    _exit(1);
-  } else {
-    close(link[1]);
-
-    ssize_t nbytes = read(link[0], buf, len);
-    if (nbytes > 0) buf[nbytes - 1] = '\0';
-    /* INFO: If something went wrong, at least we must ensure it is NULL-terminated */
-    else buf[0] = '\0';
-
-    wait(NULL);
-
-    close(link[0]);
-  }
-
-  return true;
 }
 
 bool check_unix_socket(int fd, bool block) {
@@ -597,16 +538,6 @@ struct mountinfos {
   struct mountinfo *mounts;
   size_t length;
 };
-
-char *strndup(const char *restrict str, size_t length) {
-  char *restrict copy = malloc(length + 1);
-  if (copy == NULL) return NULL;
-
-  memcpy(copy, str, length);
-  copy[length] = '\0';
-
-  return copy;
-}
 
 void free_mounts(struct mountinfos *restrict mounts) {
   for (size_t i = 0; i < mounts->length; i++) {

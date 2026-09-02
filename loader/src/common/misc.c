@@ -50,6 +50,112 @@ struct kernel_version parse_kversion() {
   return version;
 }
 
+/* INFO: Parses the lines of an already-open maps stream into a fresh
+         maps_info. Returns NULL on failure. */
+static struct maps_info *parse_maps_stream(FILE *fp) {
+  struct maps_info *info_array = calloc(1, sizeof(struct maps_info));
+  if (info_array == NULL) {
+    PLOGE("allocate memory");
+
+    return NULL;
+  }
+
+  size_t infos_capacity = 2;
+  info_array->maps = malloc(infos_capacity * sizeof(struct map_entry));
+  if (info_array->maps == NULL) {
+    PLOGE("allocate memory for maps");
+
+    free(info_array);
+
+    return NULL;
+  }
+  info_array->length = 0;
+
+  char line[1024];
+  while (fgets(line, sizeof(line), fp) != NULL) {
+    line[strlen(line) - 1] = '\0';
+
+    uintptr_t start, end, offset;
+    unsigned int dev_major, dev_minor;
+    ino_t inode;
+    char perms[5] = { 0 };
+    int path_off;
+
+    if (sscanf(line, "%" PRIxPTR "-%" PRIxPTR " %4s %" PRIxPTR " %x:%x %lu %n",
+               &start, &end, perms, &offset, &dev_major, &dev_minor, &inode, &path_off) != 7) {
+      continue;
+    }
+
+    uint8_t perms_bit = 0;
+    if (perms[0] == 'r') perms_bit |= PROT_READ;
+    if (perms[1] == 'w') perms_bit |= PROT_WRITE;
+    if (perms[2] == 'x') perms_bit |= PROT_EXEC;
+
+    while (isspace((unsigned char)line[path_off]))
+      path_off++;
+
+    char *path_str = strdup(line + path_off);
+    if (path_str == NULL) {
+      PLOGE("allocate memory for map path");
+
+      goto cleanup_maps;
+    }
+
+    if (info_array->length >= infos_capacity) {
+      infos_capacity *= 2;
+      struct map_entry *tmp_maps = realloc(info_array->maps, infos_capacity * sizeof(struct map_entry));
+      if (tmp_maps == NULL) {
+        PLOGE("reallocate (extend: %zu -> %zu) memory for maps", infos_capacity / 2, infos_capacity);
+
+        goto cleanup_maps_and_path;
+      }
+      info_array->maps = tmp_maps;
+    }
+
+    struct map_entry new_map = {
+      .start = start,
+      .end = end,
+      .perms = perms_bit,
+      .is_private = (perms[3] == 'p'),
+      .offset = offset,
+      .dev = makedev(dev_major, dev_minor),
+      .inode = inode,
+      .path = path_str
+    };
+
+    info_array->maps[info_array->length++] = new_map;
+
+    continue;
+
+    cleanup_maps_and_path:
+      free(path_str);
+    cleanup_maps:
+      for (size_t i = 0; i < info_array->length; i++) {
+        free(info_array->maps[i].path);
+      }
+      free(info_array->maps);
+      free(info_array);
+
+      return NULL;
+  }
+
+  if (info_array->length == 0) {
+    LOGE("Failed to find any maps");
+
+    free_maps(info_array);
+
+    return NULL;
+  }
+
+  /* INFO: Resize to the actual size */
+  struct map_entry *tmp_maps = realloc(info_array->maps, info_array->length * sizeof(struct map_entry));
+  if (tmp_maps == NULL)
+    PLOGE("reallocate (reduce: %zu -> %zu) memory for maps", infos_capacity, info_array->length);
+  else info_array->maps = tmp_maps;
+
+  return info_array;
+}
+
 /* INFO: Opening /proc/.../maps leads to its access time being updated. This
            function bypasses this by reading the maps from a forked process,
            which is the same memory topology anyway. See more information in
@@ -130,7 +236,7 @@ struct maps_info *parse_maps_safe(const char *pid) {
   }
 
   FILE *fp = fdopen(fd, "r");
-  if (!fp) {
+  if (fp == NULL) {
     LOGE("Failed to open file descriptor as FILE");
 
     close(fd);
@@ -139,138 +245,22 @@ struct maps_info *parse_maps_safe(const char *pid) {
     return NULL;
   }
 
-  struct maps_info *info_array = calloc(1, sizeof(struct maps_info));
-  if (!info_array) {
-    PLOGE("allocate memory");
-
-    fclose(fp);
-
-    close(fd);
-    close(sockets[0]);
-
-    return NULL;
-  }
-
-  size_t infos_capacity = 2;
-  info_array->maps = malloc(infos_capacity * sizeof(struct map_entry));
-  if (!info_array->maps) {
-    PLOGE("allocate memory for maps");
-
-    free(info_array);
-
-    close(fd);
-    close(sockets[0]);
-
-    return NULL;
-  }
-  info_array->length = 0;
-
-  char line[1024];
-  while (fgets(line, sizeof(line), fp) != NULL) {
-    line[strlen(line) - 1] = '\0';
-
-    uintptr_t start, end, offset;
-    unsigned int dev_major, dev_minor;
-    ino_t inode;
-    char perms[5] = { 0 };
-    int path_off;
-
-    if (sscanf(line, "%" PRIxPTR "-%" PRIxPTR " %4s %" PRIxPTR " %x:%x %lu %n",
-               &start, &end, perms, &offset, &dev_major, &dev_minor, &inode, &path_off) != 7) {
-      continue;
-    }
-
-    uint8_t perms_bit = 0;
-    if (perms[0] == 'r') perms_bit |= PROT_READ;
-    if (perms[1] == 'w') perms_bit |= PROT_WRITE;
-    if (perms[2] == 'x') perms_bit |= PROT_EXEC;
-
-    while (isspace((unsigned char)line[path_off]))
-      path_off++;
-
-    char *path_str = strdup(line + path_off);
-    if (!path_str) {
-      PLOGE("allocate memory for map path");
-
-      goto cleanup_maps;
-    }
-
-    if (info_array->length >= infos_capacity) {
-      infos_capacity *= 2;
-      struct map_entry *tmp_maps = realloc(info_array->maps, infos_capacity * sizeof(struct map_entry));
-      if (!tmp_maps) {
-        PLOGE("reallocate (extend: %zu -> %zu) memory for maps", infos_capacity / 2, infos_capacity);
-
-        goto cleanup_maps_and_path;
-      }
-      info_array->maps = tmp_maps;
-    }
-
-    struct map_entry new_map = {
-      .start = start,
-      .end = end,
-      .perms = perms_bit,
-      .is_private = (perms[3] == 'p'),
-      .offset = offset,
-      .dev = makedev(dev_major, dev_minor),
-      .inode = inode,
-      .path = path_str
-    };
-
-    info_array->maps[info_array->length++] = new_map;
-
-    continue;
-
-    cleanup_maps_and_path:
-      free(path_str);
-    cleanup_maps:
-      for (size_t i = 0; i < info_array->length; i++) {
-        free(info_array->maps[i].path);
-      }
-      free(info_array->maps);
-      free(info_array);
-
-      fclose(fp);
-      close(sockets[0]);
-
-      waitpid(ppid, NULL, 0);
-
-      return NULL;
-  }
-
-  fclose(fp);
+  struct maps_info *info = parse_maps_stream(fp);
 
   /* INFO: Notify the children process that we are done */
   uint8_t can_kill_itself = 1;
   if (TEMP_FAILURE_RETRY(write(sockets[0], &can_kill_itself, sizeof(can_kill_itself))) < 0) {
     LOGE("Failed to write to socket");
-
-    goto cleanup_maps;
   }
 
+  fclose(fp);
   close(sockets[0]);
 
-  if (info_array->length == 0) {
-    LOGE("Failed to find any maps in %s", pid);
-
-    free(info_array);
-
-    waitpid(ppid, NULL, 0);
-
-    return NULL;
-  }
-
-  /* INFO: Resize to the actual size */
-  struct map_entry *tmp_maps = realloc(info_array->maps, info_array->length * sizeof(struct map_entry));
-  if (!tmp_maps)
-    PLOGE("reallocate (reduce: %zu -> %zu) memory for maps", infos_capacity, info_array->length);
-
-  if (tmp_maps) info_array->maps = tmp_maps;
   /* INFO: This waitpid ensures that we only resume code execution once the child dies,
             or the child process will become zombie as shown in /proc/<child_pid>/status */
   waitpid(ppid, NULL, 0);
 
-  return info_array;
+  return info;
 }
 
 /* INFO: Accessing /proc/.../maps will update its access time. This is detectable
@@ -285,121 +275,17 @@ struct maps_info *parse_maps(const char *pid) {
   snprintf(path, sizeof(path), "/proc/%s/maps", pid);
 
   FILE *fp = fopen(path, "r");
-  if (!fp) {
+  if (fp == NULL) {
     PLOGE("Failed to open %s", path);
 
     return NULL;
   }
 
-  struct maps_info *info_array = calloc(1, sizeof(struct maps_info));
-  if (!info_array) {
-    PLOGE("allocate memory");
-
-    fclose(fp);
-
-    return NULL;
-  }
-
-  size_t infos_capacity = 2;
-  info_array->maps = malloc(infos_capacity * sizeof(struct map_entry));
-  if (!info_array->maps) {
-    PLOGE("allocate memory for maps");
-
-    free(info_array);
-    fclose(fp);
-
-    return NULL;
-  }
-  info_array->length = 0;
-
-  char line[1024];
-  while (fgets(line, sizeof(line), fp) != NULL) {
-    line[strlen(line) - 1] = '\0';
-
-    uintptr_t start, end, offset;
-    unsigned int dev_major, dev_minor;
-    ino_t inode;
-    char perms[5] = { 0 };
-    int path_off;
-
-    if (sscanf(line, "%" PRIxPTR "-%" PRIxPTR " %4s %" PRIxPTR " %x:%x %lu %n",
-               &start, &end, perms, &offset, &dev_major, &dev_minor, &inode, &path_off) != 7) {
-      continue;
-    }
-
-    uint8_t perms_bit = 0;
-    if (perms[0] == 'r') perms_bit |= PROT_READ;
-    if (perms[1] == 'w') perms_bit |= PROT_WRITE;
-    if (perms[2] == 'x') perms_bit |= PROT_EXEC;
-
-    while (isspace((unsigned char)line[path_off]))
-      path_off++;
-
-    char *path_str = strdup(line + path_off);
-    if (!path_str) {
-      PLOGE("allocate memory for map path");
-
-      goto cleanup_maps;
-    }
-
-    if (info_array->length >= infos_capacity) {
-      infos_capacity *= 2;
-      struct map_entry *tmp_maps = realloc(info_array->maps, infos_capacity * sizeof(struct map_entry));
-      if (!tmp_maps) {
-        PLOGE("reallocate (extend: %zu -> %zu) memory for maps", infos_capacity / 2, infos_capacity);
-
-        goto cleanup_maps_and_path;
-      }
-      info_array->maps = tmp_maps;
-    }
-
-    struct map_entry new_map = {
-      .start = start,
-      .end = end,
-      .perms = perms_bit,
-      .is_private = (perms[3] == 'p'),
-      .offset = offset,
-      .dev = makedev(dev_major, dev_minor),
-      .inode = inode,
-      .path = path_str
-    };
-
-    info_array->maps[info_array->length++] = new_map;
-
-    continue;
-
-    cleanup_maps_and_path:
-      free(path_str);
-    cleanup_maps:
-      for (size_t i = 0; i < info_array->length; i++) {
-        free(info_array->maps[i].path);
-      }
-      free(info_array->maps);
-      free(info_array);
-
-      fclose(fp);
-
-      return NULL;
-  }
+  struct maps_info *info = parse_maps_stream(fp);
 
   fclose(fp);
 
-  if (info_array->length == 0) {
-    LOGE("Failed to find any maps in %s", pid);
-
-    free(info_array);
-
-    return NULL;
-  }
-
-  /* INFO: Resize to the actual size */
-  struct map_entry *tmp_maps = realloc(info_array->maps, info_array->length * sizeof(struct map_entry));
-  if (!tmp_maps)
-    PLOGE("reallocate (reduce: %zu -> %zu) memory for maps", infos_capacity, info_array->length);
-
-  if (tmp_maps) info_array->maps = tmp_maps;
-
-  return info_array;
+  return info;
 }
 
 void free_maps(struct maps_info *maps) {

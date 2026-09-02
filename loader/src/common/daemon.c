@@ -55,24 +55,18 @@ static int rezygiskd_connect(uint8_t retry) {
   return -1;
 }
 
-/* TODO: We should unify all of those */
-#define safe_write(fn, name, ret_type)             \
-  if (fn == -1) {                                  \
-    LOGE("Failed to write " name " to VexZygiskd"); \
-                                                   \
-    close(fd);                                     \
-                                                   \
-    ret_type;                                      \
-  }
-
-#define safe_read(fn, name, ret_type)               \
+/* INFO: Logs the failed exchange, closes the daemon socket and bails out. */
+#define safe_check(fn, what, ret_type)              \
   if (fn == -1) {                                   \
-    LOGE("Failed to read " name " from VexZygiskd"); \
+    LOGE("Failed to " what " with VexZygiskd");     \
                                                     \
     close(fd);                                      \
                                                     \
     ret_type;                                       \
   }
+
+#define safe_write(fn, name, ret_type) safe_check(fn, "write " name, ret_type)
+#define safe_read(fn, name, ret_type)  safe_check(fn, "read " name, ret_type)
 
 bool rezygiskd_zygote_injected() {
   int fd = rezygiskd_connect(5);

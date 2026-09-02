@@ -977,8 +977,30 @@ void sigchld_listener_stop() {
 
 static char pre_section[1024];
 static char post_section[1024];
+static char module_text[2048];
+
+/* INFO: Folds the detected Zygisk modules into the module description so the
+         manager shows them right on the module card, Mountify-style. */
+static void build_module_text(void) {
+  module_text[0] = '\0';
+
+  if (environment_information.modules == NULL || environment_information.modules_len == 0) return;
+
+  size_t off = snprintf(module_text, sizeof(module_text), "Modules: ");
+  for (uint32_t i = 0; i < environment_information.modules_len && off < sizeof(module_text); i++) {
+    const char *name = environment_information.modules[i] ? environment_information.modules[i] : "?";
+    bool is_next = environment_information.modules_zn && environment_information.modules_zn[i];
+
+    if (i > 0) off += snprintf(module_text + off, sizeof(module_text) - off, ", ");
+    off += snprintf(module_text + off, sizeof(module_text) - off, "%s%s", name, is_next ? " (Next)" : "");
+  }
+
+  snprintf(module_text + off, sizeof(module_text) - off, " · ");
+}
 
 static bool update_status(const char *message) {
+  build_module_text();
+
   FILE *prop = fopen("/data/adb/modules/rezygisk/module.prop", "w");
   if (prop == NULL) {
     PLOGE("failed to open prop");
@@ -987,7 +1009,7 @@ static bool update_status(const char *message) {
   }
 
   if (message) {
-    fprintf(prop, "%s[%s] %s", pre_section, message, post_section);
+    fprintf(prop, "%s[%s] %s%s", pre_section, message, module_text, post_section);
     fclose(prop);
 
     return true;
@@ -1033,7 +1055,7 @@ static bool update_status(const char *message) {
     }
   }
 
-  fprintf(prop, "%s[%s] %s", pre_section, status_text, post_section);
+  fprintf(prop, "%s[%s] %s%s", pre_section, status_text, module_text, post_section);
   fclose(prop);
 
   if (environment_information.root_impl) {

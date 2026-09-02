@@ -25,10 +25,12 @@ SYSROOT = $(TOOLCHAIN)/sysroot
 
 ifeq ($(TERMUX_VERSION),)
 	CC = $(TOOLCHAIN)/bin/clang
+	CXX = $(TOOLCHAIN)/bin/clang++
 	AR = $(TOOLCHAIN)/bin/llvm-ar
 	STRIP = $(TOOLCHAIN)/bin/llvm-strip
 else
 	CC = clang
+	CXX = clang++
 	AR = llvm-ar
 	STRIP = llvm-strip
 endif
@@ -39,6 +41,7 @@ TARGET_arm64-v8a = aarch64-linux-android$(API_LEVEL)
 TARGET_armeabi-v7a = armv7a-linux-androideabi$(API_LEVEL)
 
 CC_ARCH = $(CC) --target=$(TARGET_$(ARCH)) --sysroot=$(SYSROOT)
+CXX_ARCH = $(CXX) --target=$(TARGET_$(ARCH)) --sysroot=$(SYSROOT)
 
 NDK_CFLAGS = -DANDROID -fdata-sections -ffunction-sections -funwind-tables \
 	-fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 \

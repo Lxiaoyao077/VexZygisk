@@ -301,7 +301,7 @@ static bool load_entry(struct zn_entry *entry, struct csoloader *lib, int module
 
   LOGD("Loading the Zygisk Next module [%s] targeting %s", entry->lib_path, entry->target);
 
-  module->onModuleLoaded((void *)entry, zn_get_api());
+  module->onModuleLoaded((void *)entry, zn_get_api_for_version(module->target_api_version));
 
   return true;
 }

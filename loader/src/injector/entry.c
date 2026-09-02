@@ -4,6 +4,7 @@
 
 #include "hook.h"
 #include "ptrace_clear.h"
+#include "zn_loader.h"
 
 __attribute__((visibility("default")))
 void entry(void *addr, size_t size, int tango_flag) {
@@ -14,6 +15,8 @@ void entry(void *addr, size_t size, int tango_flag) {
 
   LOGD("start plt hooking");
   hook_functions();
+
+  zn_load_all_modules();
 
   struct kernel_version version = parse_kversion();
   if (version.major > 3 || (version.major == 3 && version.minor >= 8)) {

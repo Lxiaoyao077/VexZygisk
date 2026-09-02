@@ -423,6 +423,18 @@ ElfImg *ElfImg_create(const char *elf, void *base) {
   return img;
 }
 
+bool _load_symtabs(ElfImg *img);
+
+bool ElfImg_load_symbols(ElfImg *img) {
+  return _load_symtabs(img);
+}
+
+const char *getSymbName(ElfImg *img, ElfW(Sym) *sym) {
+  if (img == NULL || sym == NULL || img->symstr_offset_for_symtab == 0) return NULL;
+
+  return (const char *)(offsetOf_char(img->header, img->symstr_offset_for_symtab) + sym->st_name);
+}
+
 bool _load_symtabs(ElfImg *img) {
   if (img->symtabs_) return true;
 
@@ -597,35 +609,7 @@ ElfW(Addr) LinearLookup(ElfImg *img, const char *restrict name, unsigned char *s
   return 0;
 }
 
-ElfW(Addr) LinearLookupByPrefix(ElfImg *img, const char *prefix, unsigned char *sym_type) {
-  if (!_load_symtabs(img)) return 0;
-
-  if (img->symtabs_count_ == 0) {
-    LOGW("No valid symbols (FUNC/OBJECT with size > 0) found in .symtab for %s", img->elf);
-
-    return 0;
-  }
-
-  size_t prefix_len = strlen(prefix);
-  if (prefix_len == 0) return 0;
-
-  for (size_t i = 0; i < img->symtabs_count_; i++) {
-    ElfW(Sym) *sym = img->symtabs_[i];
-
-    const char *name = offsetOf_char(img->header, img->symstr_offset_for_symtab) + sym->st_name;
-    if (sym->st_shndx == SHN_UNDEF || strncmp(name, prefix, prefix_len) != 0)
-      continue;
-
-    unsigned int type = ELF_ST_TYPE(sym->st_info);
-    if (sym_type) *sym_type = type;
-
-    return sym->st_value;
-  }
-
-  return 0;
-}
-
-ElfW(Addr) getSymbOffset(ElfImg *img, const char *name, unsigned char *sym_type) {
+static ElfW(Addr) getSymbOffset(ElfImg *img, const char *name, unsigned char *sym_type) {
   ElfW(Addr) offset = 0;
 
   offset = GnuLookup(img, name, GnuHash(name), sym_type);
@@ -758,23 +742,3 @@ ElfW(Addr) getSymbAddress(ElfImg *img, const char *name) {
   return (ElfW(Addr))((uintptr_t)img->base + offset - img->bias);
 }
 
-ElfW(Addr) getSymbAddressByPrefix(ElfImg *img, const char *prefix) {
-  unsigned char sym_type = 0;
-  ElfW(Addr) offset = LinearLookupByPrefix(img, prefix, &sym_type);
-
-  if (offset == 0 || !img->base) return 0;
-
-  if (sym_type == STT_GNU_IFUNC) {
-    LOGD("Resolving STT_GNU_IFUNC symbol by prefix %s", prefix);
-
-    return handle_indirect_symbol(img, offset);
-  }
-
-  return (ElfW(Addr))((uintptr_t)img->base + offset - img->bias);
-}
-
-void *getSymbValueByPrefix(ElfImg *img, const char *prefix) {
-  ElfW(Addr) address = getSymbAddressByPrefix(img, prefix);
-
-  return address == 0 ? NULL : *((void **)address);
-}

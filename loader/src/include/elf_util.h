@@ -1,6 +1,8 @@
 #ifndef ELF_UTIL_H
 #define ELF_UTIL_H
 
+#include <stdbool.h>
+
 #include <link.h>
 #include <sys/types.h>
 
@@ -52,12 +54,10 @@ void ElfImg_destroy(ElfImg *img);
 
 ElfImg *ElfImg_create(const char *elf, void *base);
 
-ElfW(Addr) getSymbOffset(ElfImg *img, const char *name, unsigned char *sym_type);
+bool ElfImg_load_symbols(ElfImg *img);
+
+const char *getSymbName(ElfImg *img, ElfW(Sym) *sym);
 
 ElfW(Addr) getSymbAddress(ElfImg *img, const char *name);
-
-ElfW(Addr) getSymbAddressByPrefix(ElfImg *img, const char *prefix);
-
-void *getSymbValueByPrefix(ElfImg *img, const char *prefix);
 
 #endif /* ELF_UTIL_H */

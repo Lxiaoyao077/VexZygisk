@@ -943,6 +943,8 @@ static bool load_modules_only(void) {
     return false;
   }
 
+  zygisk_module_length = 0;
+
   zygisk_modules = (struct rezygisk_module *)malloc(ms.modules_count * sizeof(struct rezygisk_module));
   if (!zygisk_modules) {
     LOGE("Failed to allocate memory for modules");
@@ -961,8 +963,6 @@ static bool load_modules_only(void) {
       /* INFO: In case a module failed to load, update the list of available modules
            in VexZygiskd to avoid a mismatch between the loaded modules in VexZygisk
            Zygote library and the available modules in VexZygiskd. */
-      /* TODO: Update the list of modules for VexZygisk monitor, so that it can update
-                 for WebUI. That is simply cosmetic, though. */
       rezygiskd_remove_module(i);
 
       continue;
@@ -1271,6 +1271,7 @@ static void rz_cleanup(struct zygisk_context *ctx) {
   for (size_t i = 0; i < zygisk_module_length; i++) {
     memset(&zygisk_modules[i], 0, sizeof(zygisk_modules[i]));
   }
+  zygisk_module_length = 0;
 
   enable_unloader = true;
   pthread_mutex_destroy(&ctx->hook_info_lock);

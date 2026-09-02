@@ -1,0 +1,6 @@
+{
+  "version": "v2.1.2",
+  "versionCode": 591,
+  "zipUrl": "https://github.com/Lxiaoyao077/VexZygisk/releases/download/v2.1.2/VexZygisk-v2.1.2-591-10cc542-release.zip",
+  "changelog": "VexZygisk v2.1.2\n\n- Fixed modules that ship both a Zygisk library and zn_modules.txt (e.g. LSPosed) showing twice in the module description; they now appear once with the (Next) marker\n- Detected Zygisk modules are listed right in the module description, Mountify-style; no WebUI, no action script"
+}

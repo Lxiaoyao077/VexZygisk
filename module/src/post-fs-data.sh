@@ -3,9 +3,6 @@
 set -e
 
 MODDIR=${0%/*}
-if [ "$ZYGISK_ENABLED" ]; then
-  exit 0
-fi
 
 cd "$MODDIR"
 
@@ -22,9 +19,6 @@ create_sys_perm $TMP_PATH
 
 sh /data/adb/post-fs-data.d/rezygisk.sh
 
-# INFO: A single monitor is started, and it matches the bitness of what got installed. The
-#         64-bit build is preferred whenever present, since it is the one shipped to every
-#         64-bit device. 32-bit only devices fall back to the 32-bit build.
 if [ -f "$MODDIR/bin/zygisk-ptrace64" ]; then
   "$MODDIR/bin/zygisk-ptrace64" monitor &
 elif [ -f "$MODDIR/bin/zygisk-ptrace32" ]; then

@@ -20,3 +20,10 @@ allow zygote appdomain_tmpfs file *
 
 # INFO: Needed for Tango Zygote
 allow zygote system_lib_file file execmod
+
+# INFO: VexZygiskd hands module libraries to the injected loader as memfds.
+#       Their SELinux label depends on the daemon's domain ("magisk_memfd",
+#       "su_memfd", "ksud_memfd", ...), so every label has to be covered:
+#       dlopen needs `execute` on the memfd no matter which root
+#       implementation created it.
+allow * * file execute

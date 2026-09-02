@@ -59,8 +59,6 @@
 
 bool switch_mount_namespace(pid_t pid);
 
-void get_property(const char *name, char *restrict output);
-
 void set_socket_create_context(const char *restrict context);
 
 void unix_datagram_sendto(const char *restrict path, const void *restrict buf, size_t len);
@@ -71,6 +69,11 @@ int unix_listener_from_path(const char *path);
 
 ssize_t write_fd(int fd, int sendfd);
 int read_fd(int fd);
+
+int create_library_fd(const char *restrict path);
+
+ssize_t write_loop(int fd, const void *restrict buf, size_t count);
+ssize_t read_loop(int fd, void *restrict buf, size_t count);
 
 write_func_def(size_t);
 read_func_def(size_t);
@@ -84,8 +87,6 @@ read_func_def(uint8_t);
 ssize_t write_string(int fd, const char *restrict str);
 
 ssize_t read_string(int fd, char *restrict buf, size_t buf_size);
-
-bool exec_command(char *restrict buf, size_t len, const char *restrict file, const char *const argv[]);
 
 bool check_unix_socket(int fd, bool block);
 

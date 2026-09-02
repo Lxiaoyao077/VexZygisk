@@ -6,6 +6,9 @@
           - Long mode: capacity/size/pointer at platform-specific offsets
 */
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #include "cpp_strings.h"
 
 #ifdef __LP64__

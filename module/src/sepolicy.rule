@@ -2,7 +2,10 @@ type zygisk_file file_type
 typeattribute zygisk_file mlstrustedobject
 allow zygote zygisk_file sock_file {read write}
 
-allow zygote unlabeled file {read open}
+# INFO: "map" and "execute" are needed on top of "read open" because the loader
+#       mmaps and dlopens module libraries that reach it as unlabeled memfds on
+#       kernels without the tmpfs labelling.
+allow zygote unlabeled file {getattr read open map execute}
 allow zygote zygote capability sys_chroot
 
 # INFO: To allow to setns on the Zygote's child mns. KernelSU renamed the su context to ksu
@@ -30,3 +33,30 @@ allow zygote system_lib_file file execmod
 #       hole in its own right and is exactly what makes LSPosed/Vector report
 #       its dex2oat wrapper as unsupported ("SELinux not properly configured").
 allow * ksu file execute
+
+# INFO: How a memfd is labelled depends on the kernel:
+#
+#         - GKI kernels: an anonymous inode of the tmpfs superblock, class
+#           "file", type "tmpfs". Covered for zygote by "allow zygote tmpfs
+#           file *" above, but the daemon-spawned ZN companion loads the very
+#           same memfds and had no rule at all.
+#
+#         - Other kernels: the memfd shows up as "unlabeled". Zygote only had
+#           "read open" here, which lets it receive the descriptor and still
+#           fail the mmap that dlopen performs; the companion had nothing.
+#
+#         - Newer kernels (Android 17 QPR1 onwards): memfds are labelled
+#           through security_inode_init_security_anon(), carrying the creating
+#           task's own SID under the new "memfd_file" class. Neither a tmpfs
+#           nor a file rule matches that, so every SCM_RIGHTS transfer of a
+#           memfd is silently dropped and no module library can be handed over.
+#
+#       Without these, the loader receives nothing for ReadZnModules and the
+#       ZN companion cannot dlopen its library: the ZN module never loads,
+#       while descriptor-free actions such as GetProcessFlags keep working,
+#       which makes the failure look like a matching problem.
+allow zygote ksu memfd_file {getattr read write map execute}
+
+allow ksu ksu memfd_file {getattr read write map execute}
+allow ksu tmpfs file {getattr read write map execute}
+allow ksu unlabeled file {getattr read write map execute}

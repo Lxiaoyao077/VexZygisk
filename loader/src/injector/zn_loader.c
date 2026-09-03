@@ -4,13 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <dlfcn.h>
+
+#include <android/dlext.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <linux/limits.h>
+#include <linux/memfd.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-#include <csoloader.h>
 
 #include "daemon.h"
 #include "logging.h"
@@ -44,9 +48,95 @@ struct zn_entry {
          is never unloaded once its callbacks are installed. The entries are
          handed to the modules as their self handle, so they must outlive the
          scan that produced them. */
-static struct csoloader loaded_libs[ZN_MAX_MODULES];
+static void *loaded_libs[ZN_MAX_MODULES];
 static struct zn_entry loaded_entries[ZN_MAX_MODULES];
 static size_t loaded_libs_count = 0;
+
+/* INFO: The ZN modules are loaded by the system linker, exactly as Zygisk Next
+         does it. dlopen() of a path under /data/adb fails for most targets
+         because the linker's namespace "permitted path" check rejects
+         non-system paths, and loading through a plain fd (a memfd handed over
+         by the daemon) is also rejected: bionic re-checks namespace
+         accessibility for every fd that does not live on tmpfs. Copying the
+         bytes into a memfd owned by this process sidesteps both checks.
+
+         The memfd is deliberately left open: bionic does not take ownership of
+         ANDROID_DLEXT_USE_LIBRARY_FD descriptors and may keep reading from
+         them for the whole life of the loaded library. */
+static void *dlopen_via_fd(const char *path, int flags) {
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    LOGE("dlopen %s: cannot open: %s", path, strerror(errno));
+
+    return NULL;
+  }
+
+  int mem_fd = (int)syscall(SYS_memfd_create, "zn-module", MFD_CLOEXEC);
+  if (mem_fd < 0) {
+    LOGE("dlopen %s: memfd_create failed: %s", path, strerror(errno));
+
+    close(fd);
+
+    return NULL;
+  }
+
+  char buffer[65536];
+  ssize_t got;
+  bool copied = true;
+
+  while ((got = read(fd, buffer, sizeof(buffer))) > 0) {
+    size_t left = (size_t)got;
+    const char *cursor = buffer;
+
+    while (left > 0) {
+      ssize_t written = write(mem_fd, cursor, left);
+      if (written <= 0) {
+        copied = false;
+
+        break;
+      }
+
+      cursor += written;
+      left -= (size_t)written;
+    }
+
+    if (!copied) break;
+  }
+
+  close(fd);
+
+  if (!copied || got < 0) {
+    LOGE("dlopen %s: copy to memfd failed: %s", path, strerror(errno));
+
+    close(mem_fd);
+
+    return NULL;
+  }
+
+  android_dlextinfo info = { 0 };
+  info.flags = ANDROID_DLEXT_USE_LIBRARY_FD;
+  info.library_fd = mem_fd;
+
+  void *lib = android_dlopen_ext(path, flags, &info);
+  if (lib == NULL) LOGE("dlopen %s via memfd failed: %s", path, dlerror());
+
+  /* INFO: The memfd stays open either way, see above. */
+  return lib;
+}
+
+/* INFO: Same contract as dlopen_via_fd, but the memfd already exists: the
+         daemon created it on our behalf, which is the only mode that works for
+         a target that cannot read /data/adb itself. */
+static void *dlopen_from_fd(int fd, const char *name, int flags) {
+  android_dlextinfo info = { 0 };
+  info.flags = ANDROID_DLEXT_USE_LIBRARY_FD;
+  info.library_fd = fd;
+
+  void *lib = android_dlopen_ext(name, flags, &info);
+  if (lib == NULL) LOGE("dlopen %s from fd %d failed: %s", name, fd, dlerror());
+
+  return lib;
+}
 
 static char *read_process_path(void) {
   char buf[PATH_MAX];
@@ -139,15 +229,14 @@ static bool matches_process(const struct zn_entry *entry, const char *process_pa
          module performs. Each request carries one command byte plus the socket
          to hand over through SCM_RIGHTS. */
 static void companion_main(const char *lib_path, int socket_fd) {
-  struct csoloader lib;
-
-  if (!csoloader_load(&lib, lib_path)) {
+  void *lib = dlopen_via_fd(lib_path, RTLD_NOW);
+  if (lib == NULL) {
     LOGE("Failed loading the Zygisk Next companion library [%s]", lib_path);
 
     return;
   }
 
-  struct ZygiskNextCompanionModule *companion = (struct ZygiskNextCompanionModule *)csoloader_get_symbol(&lib, "zn_companion_module");
+  struct ZygiskNextCompanionModule *companion = (struct ZygiskNextCompanionModule *)dlsym(lib, "zn_companion_module");
   if (companion == NULL || companion->onCompanionLoaded == NULL || companion->onModuleConnected == NULL) {
     LOGE("The library [%s] does not export a usable zn_companion_module", lib_path);
 
@@ -242,34 +331,41 @@ static int spawn_companion(const char *lib_path) {
   return sockets[0];
 }
 
-static bool load_entry(struct zn_entry *entry, struct csoloader *lib, int module_fd) {
+static bool load_entry(struct zn_entry *entry, void **lib_handle, int module_fd) {
+  void *lib = NULL;
+
   if (module_fd >= 0) {
     /* INFO: The daemon opened the file for us because this process cannot read
-             /data/adb/modules, so it is loaded through its descriptor. */
-    char fd_path[PATH_MAX];
-    snprintf(fd_path, PATH_MAX, "/proc/self/fd/%d", module_fd);
-
-    if (!csoloader_load(lib, fd_path)) {
+             /data/adb/modules, so it is loaded through its memfd descriptor.
+             The descriptor stays open for the life of the library, bionic does
+             not take ownership of it. */
+    lib = dlopen_from_fd(module_fd, entry->lib_path, RTLD_NOW);
+    if (lib == NULL) {
       LOGE("Failed loading the Zygisk Next library [%s] from its fd", entry->lib_path);
+
+      close(module_fd);
 
       return false;
     }
-  } else if (!csoloader_load(lib, entry->lib_path)) {
-    LOGE("Failed loading the Zygisk Next library [%s]", entry->lib_path);
+  } else {
+    lib = dlopen_via_fd(entry->lib_path, RTLD_NOW);
+    if (lib == NULL) {
+      LOGE("Failed loading the Zygisk Next library [%s]", entry->lib_path);
 
-    return false;
+      return false;
+    }
   }
 
-  struct ZygiskNextModule *module = (struct ZygiskNextModule *)csoloader_get_symbol(lib, "zn_module");
+  struct ZygiskNextModule *module = (struct ZygiskNextModule *)dlsym(lib, "zn_module");
   if (module == NULL) {
     /* INFO: Not worth an error: a module may ship a zn_modules.txt and still
              only speak the standard Zygisk contract, LSPosed being the common
              case. It is then loaded by the standard path, which runs its
-             zygisk_module_entry. Leaving this mapping behind would give the
-             target two copies of the library, so it is dropped again. */
+             zygisk_module_entry. */
     LOGW("The library [%s] does not export zn_module, it is not a Zygisk Next module", entry->lib_path);
 
-    csoloader_unload(lib);
+    dlclose(lib);
+    if (module_fd >= 0) close(module_fd);
 
     return false;
   }
@@ -277,7 +373,8 @@ static bool load_entry(struct zn_entry *entry, struct csoloader *lib, int module
   if (module->target_api_version < 1 || module->target_api_version > ZYGISK_NEXT_API_VERSION) {
     LOGE("Unsupported Zygisk Next API version %d in [%s]", module->target_api_version, entry->lib_path);
 
-    csoloader_unload(lib);
+    dlclose(lib);
+    if (module_fd >= 0) close(module_fd);
 
     return false;
   }
@@ -285,7 +382,8 @@ static bool load_entry(struct zn_entry *entry, struct csoloader *lib, int module
   if (module->onModuleLoaded == NULL) {
     LOGE("The library [%s] exports zn_module without an onModuleLoaded callback", entry->lib_path);
 
-    csoloader_unload(lib);
+    dlclose(lib);
+    if (module_fd >= 0) close(module_fd);
 
     return false;
   }
@@ -300,6 +398,11 @@ static bool load_entry(struct zn_entry *entry, struct csoloader *lib, int module
   }
 
   LOGD("Loading the Zygisk Next module [%s] targeting %s", entry->lib_path, entry->target);
+
+  /* INFO: From here on the library stays loaded for the life of the process:
+             its callbacks and hooks outlive this call, unloading is not an
+             option. */
+  *lib_handle = lib;
 
   module->onModuleLoaded((void *)entry, zn_get_api_for_version(module->target_api_version));
 
@@ -462,7 +565,15 @@ static bool load_modules_from_daemon(const char *process_name, const char *proce
       break;
     }
 
-    if (load_entry(entry, &loaded_libs[loaded_libs_count], files[i].fd)) {
+    /* INFO: load_entry takes over the descriptor: a loaded library keeps it
+             for its whole life (bionic does not own USE_LIBRARY_FD fds), and a
+             failed one closes it on the spot. Handing it over here, instead of
+             letting free_zn_module_files close everything, keeps a loaded
+             library's descriptor alive and avoids a double close on failure. */
+    int module_fd = files[i].fd;
+    files[i].fd = -1;
+
+    if (load_entry(entry, &loaded_libs[loaded_libs_count], module_fd)) {
       loaded_libs_count++;
 
       continue;

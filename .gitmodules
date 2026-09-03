@@ -7,3 +7,7 @@
 [submodule "Dobby"]
 	path = loader/src/external/dobby
 	url = https://github.com/LSPosed/Dobby.git
+
+[submodule "LSPlt"]
+	path = loader/src/external/lsplt
+	url = https://github.com/LSPosed/LSPlt.git

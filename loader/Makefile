@@ -113,6 +113,25 @@ DOBBY_INCLUDES = -I$(DOBBY_DIR)/include -I$(DOBBY_DIR)/source -I$(DOBBY_DIR)/sou
 				 -I$(DOBBY_DIR)/external -I$(DOBBY_DIR)/external/logging \
 				 -I$(DOBBY_DIR)/source/Backend/UserMode
 
+# INFO: LSPlt serves the Zygisk Next pltHook, the same engine NyaZygisk uses.
+#       Like Dobby it is C++ and ships no plain Makefile, so its two sources
+#       are compiled here. Its own build defaults for the C++ runtime are
+#       kept (no -fno-exceptions/-fno-rtti) because it leans on the standard
+#       library, which the final -static-libstdc++ link bundles.
+LSPLT_DIR = src/external/lsplt
+LSPLT_JNI = $(LSPLT_DIR)/lsplt/src/main/jni
+
+LSPLT_SRCS = lsplt.cc elf_util.cc
+LSPLT_OBJ_DIR = $(BUILD_DIR)/obj/$(BUILD_TYPE)/lsplt/$(ARCH)
+LSPLT_OBJS = $(addsuffix .o,$(addprefix $(LSPLT_OBJ_DIR)/,$(LSPLT_SRCS)))
+LSPLT_LIB = $(BUILD_DIR)/obj/$(BUILD_TYPE)/lsplt/$(ARCH)/liblsplt.a
+
+LSPLT_CXXFLAGS = -std=c++20 -D_GNU_SOURCE -fno-stack-protector -fomit-frame-pointer \
+				 -Wno-unused -Wno-unused-parameter
+
+INJECTOR_CXX_SRCS = src/injector/zn_lsplt_shim.cpp
+INJECTOR_CXX_OBJS = $(patsubst src/injector/%.cpp,$(OBJ_DIR)/injector/%.o,$(INJECTOR_CXX_SRCS))
+
 .PHONY: all arch clean
 
 all:
@@ -127,6 +146,7 @@ clean:
 	rm -rf $(BUILD_DIR)/obj/$(BUILD_TYPE)/plti
 	rm -rf $(BUILD_DIR)/obj/$(BUILD_TYPE)/csoloader
 	rm -rf $(BUILD_DIR)/obj/$(BUILD_TYPE)/dobby
+	rm -rf $(BUILD_DIR)/obj/$(BUILD_TYPE)/lsplt
 
 $(PLTI_LIB):
 	@mkdir -p $(dir $@)
@@ -160,6 +180,15 @@ $(DOBBY_LIB): $(DOBBY_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
+$(LSPLT_OBJ_DIR)/%.cc.o: $(LSPLT_JNI)/%.cc
+	@mkdir -p $(dir $@)
+	$(CXX_ARCH) $(NDK_CFLAGS) $(LSPLT_CXXFLAGS) $(TYPE_CFLAGS)    \
+		-I$(LSPLT_JNI)/include -I$(LSPLT_JNI) -fPIC -c $< -o $@
+
+$(LSPLT_LIB): $(LSPLT_OBJS)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
 $(OBJ_DIR)/common/%.o: src/common/%.c
 	@mkdir -p $(dir $@)
 	$(CC_ARCH) $(NDK_CFLAGS) $(LOADER_CFLAGS) $(TYPE_CFLAGS) \
@@ -169,6 +198,13 @@ $(OBJ_DIR)/injector/%.o: src/injector/%.c
 	@mkdir -p $(dir $@)
 	$(CC_ARCH) $(NDK_CFLAGS) $(LOADER_CFLAGS) $(TYPE_CFLAGS) \
 		$(INJECTOR_INCLUDES) -Dzygisk_EXPORTS -fPIC -c $< -o $@
+
+$(OBJ_DIR)/injector/%.o: src/injector/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX_ARCH) $(NDK_CFLAGS) -std=c++20 -D_GNU_SOURCE -Wall -Wextra     \
+		-fno-stack-protector -fomit-frame-pointer $(TYPE_CFLAGS)         \
+		$(INJECTOR_INCLUDES) -I$(LSPLT_JNI)/include -Dzygisk_EXPORTS     \
+		-fPIC -c $< -o $@
 
 $(OBJ_DIR)/ptracer/%.o: src/ptracer/%.c
 	@mkdir -p $(dir $@)
@@ -187,12 +223,13 @@ $(LIBCOMMON): $(COMMON_OBJS) $(LZMA_OBJ)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
-$(LIBZYGISK): $(INJECTOR_OBJS) $(LIBCOMMON) $(PLTI_LIB) $(CSOLOADER_LIB) $(DOBBY_LIB)
+$(LIBZYGISK): $(INJECTOR_OBJS) $(INJECTOR_CXX_OBJS) $(LIBCOMMON) $(PLTI_LIB) $(CSOLOADER_LIB) $(DOBBY_LIB) $(LSPLT_LIB)
 	@mkdir -p $(dir $@)
 	$(CXX_ARCH) -fPIC -shared -Wl,-soname,libzygisk.so                    \
 		$(COMMON_LDFLAGS) $(TYPE_LDFLAGS) -nostartfiles                   \
-		$(INJECTOR_OBJS) $(LIBCOMMON) $(PLTI_LIB) $(CSOLOADER_LIB)        \
-		$(DOBBY_LIB) -llog -lm -o $@
+		$(INJECTOR_OBJS) $(INJECTOR_CXX_OBJS) $(LIBCOMMON)                \
+		$(PLTI_LIB) $(CSOLOADER_LIB) $(DOBBY_LIB) $(LSPLT_LIB)            \
+		-llog -lm -o $@
 
 $(LIBPTRACE): $(PTRACER_OBJS) $(LIBCOMMON)
 	@mkdir -p $(dir $@)

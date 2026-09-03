@@ -5,7 +5,7 @@
 
 #include <dlfcn.h>
 #include <dobby.h>
-#include <plti.h>
+#include <sys/types.h>
 
 #include "elf_util.h"
 #include "logging.h"
@@ -14,170 +14,69 @@
 #include "zn_api.h"
 #include "zn_loader.h"
 
-static struct plti plt_ctx;
-static bool plt_ctx_ready = false;
+/* INFO: The Zygisk Next pltHook is served by LSPlt, the hooking engine the
+         LSPosed ecosystem builds its modules against, exactly as NyaZygisk
+         does. The injector is C, so the C++ island is confined to the
+         zn_lsplt_shim.cpp bridge and the static library behind it. */
+int zn_lsplt_register_hook(dev_t dev, ino_t inode, const char *symbol, void *hook, void **backup);
+int zn_lsplt_commit_hook(void);
 
-/* INFO: PLTI identifies libraries by path, while the ZN API hands us a base
-         address, so the owning library is looked up in the process maps. */
-static char *get_lib_path_by_base(uintptr_t base_addr) {
+/* INFO: LSPlt identifies libraries by file identity (device + inode), while
+         the ZN API hands us a base address, so the owning mapping is looked
+         up in the process maps. */
+static bool get_lib_location_by_base(uintptr_t base_addr, dev_t *dev, ino_t *inode) {
   struct maps_info *maps = parse_maps_safe("self");
   if (maps == NULL) {
     LOGE("Failed to scan maps for the library at %p", (void *)base_addr);
 
-    return NULL;
+    return false;
   }
 
-  char *lib_path = NULL;
+  bool found = false;
   for (size_t i = 0; i < maps->length; i++) {
     struct map_entry *entry = &maps->maps[i];
-    if (entry->start != base_addr || entry->path == NULL) continue;
+    if (entry->start != base_addr || entry->offset != 0 || entry->path == NULL) continue;
 
-    lib_path = strdup(entry->path);
+    *dev = entry->dev;
+    *inode = entry->inode;
+    found = true;
 
     break;
   }
 
   free_maps(maps);
 
-  if (lib_path == NULL) LOGE("No library mapped at %p", (void *)base_addr);
+  if (!found) LOGE("No library mapped at %p", (void *)base_addr);
 
-  return lib_path;
-}
-
-static bool ensure_plt_ctx(void) {
-  if (plt_ctx_ready) return true;
-
-  if (!plti_init(&plt_ctx)) {
-    LOGE("Failed initializing the PLT hook context");
-
-    return false;
-  }
-
-  plt_ctx_ready = true;
-
-  return true;
-}
-
-/* INFO: The Zygisk Next contract unhooks a PLT hook by calling pltHook again
-         with the original handler as the hook handler. PLTI has no notion of
-         that, so every placed hook is remembered here: a request whose handler
-         equals the remembered original restores the GOT instead of layering a
-         second entry on top. */
-#define ZN_MAX_PLT_HOOKS 64
-
-struct zn_plt_record {
-  char *lib_path;
-  char *symbol;
-  void *original;
-};
-
-static pthread_mutex_t zn_plt_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct zn_plt_record zn_plt_records[ZN_MAX_PLT_HOOKS];
-static size_t zn_plt_record_count = 0;
-
-static struct zn_plt_record *zn_find_plt_record(const char *lib_path, const char *symbol, void *original) {
-  for (size_t i = 0; i < zn_plt_record_count; i++) {
-    struct zn_plt_record *record = &zn_plt_records[i];
-
-    if (record->original != original) continue;
-    if (strcmp(record->lib_path, lib_path) != 0 || strcmp(record->symbol, symbol) != 0) continue;
-
-    return record;
-  }
-
-  return NULL;
-}
-
-static bool zn_remember_plt_record(const char *lib_path, const char *symbol, void *original) {
-  if (zn_plt_record_count >= ZN_MAX_PLT_HOOKS) {
-    LOGE("Reached the limit of %d PLT hook records, not tracking %s", ZN_MAX_PLT_HOOKS, symbol);
-
-    return false;
-  }
-
-  struct zn_plt_record *record = &zn_plt_records[zn_plt_record_count];
-
-  record->lib_path = strdup(lib_path);
-  record->symbol = strdup(symbol);
-  record->original = original;
-
-  if (record->lib_path == NULL || record->symbol == NULL) {
-    free(record->lib_path);
-    free(record->symbol);
-
-    return false;
-  }
-
-  zn_plt_record_count++;
-
-  return true;
-}
-
-static void zn_forget_plt_record(struct zn_plt_record *record) {
-  free(record->lib_path);
-  free(record->symbol);
-
-  *record = zn_plt_records[zn_plt_record_count - 1];
-  zn_plt_record_count--;
+  return found;
 }
 
 static int zn_plt_hook(void *base_addr, const char *symbol, void *hook_handler, void **original) {
   if (base_addr == NULL || symbol == NULL || hook_handler == NULL) return ZN_FAILED;
 
-  if (!ensure_plt_ctx()) return ZN_FAILED;
+  dev_t dev = 0;
+  ino_t inode = 0;
+  if (!get_lib_location_by_base((uintptr_t)base_addr, &dev, &inode)) return ZN_FAILED;
 
-  char *lib_path = get_lib_path_by_base((uintptr_t)base_addr);
-  if (lib_path == NULL) return ZN_FAILED;
+  /* INFO: LSPlt implements the ZN unhook contract natively: registering the
+             backup of a previous call back as the handler restores the GOT
+             entries and cleans up. */
+  void *backup = NULL;
+  if (zn_lsplt_register_hook(dev, inode, symbol, hook_handler, &backup) != 0) {
+    LOGE("Failed registering the PLT hook for %s", symbol);
 
-  bool result;
-
-  pthread_mutex_lock(&zn_plt_lock);
-
-  struct zn_plt_record *record = zn_find_plt_record(lib_path, symbol, hook_handler);
-
-  if (record != NULL) {
-    /* INFO: Unhooking, per the contract: the original is passed back as the
-             handler, so the GOT entries go back to it. */
-    void *stored = record->original;
-
-    result = plti_remove_hook(&plt_ctx, lib_path, symbol, &stored);
-
-    if (result) {
-      zn_forget_plt_record(record);
-
-      if (original != NULL) *original = hook_handler;
-    }
-  } else {
-    if (!plti_add_manual_lib(&plt_ctx, lib_path, (uintptr_t)base_addr)) {
-      LOGE("Failed adding %s to the PLT hook context", lib_path);
-
-      free(lib_path);
-      pthread_mutex_unlock(&zn_plt_lock);
-
-      return ZN_FAILED;
-    }
-
-    void *backup = NULL;
-    result = plti_add_hook(&plt_ctx, lib_path, symbol, hook_handler, &backup);
-
-    if (result) {
-      if (original != NULL) *original = backup;
-
-      if (!zn_remember_plt_record(lib_path, symbol, backup)) {
-        /* INFO: Without a record the hook could never be removed again, so a
-                   failed bookkeeping undoes the hook itself. */
-        plti_remove_hook(&plt_ctx, lib_path, symbol, &backup);
-
-        result = false;
-      }
-    }
+    return ZN_FAILED;
   }
 
-  pthread_mutex_unlock(&zn_plt_lock);
+  if (zn_lsplt_commit_hook() != 0) {
+    LOGE("Failed committing the PLT hook for %s", symbol);
 
-  free(lib_path);
+    return ZN_FAILED;
+  }
 
-  return result ? ZN_SUCCESS : ZN_FAILED;
+  if (original != NULL) *original = backup;
+
+  return backup ? ZN_SUCCESS : ZN_FAILED;
 }
 
 /* INFO: The Zygisk Next contract allows a single inline hook per address, so

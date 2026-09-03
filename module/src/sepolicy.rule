@@ -43,7 +43,8 @@ allow * ksu file execute
 #
 #         - Other kernels: the memfd shows up as "unlabeled". Zygote only had
 #           "read open" here, which lets it receive the descriptor and still
-#           fail the mmap that dlopen performs; the companion had nothing.
+#           fail the mmap that dlopen performs, and the companion had nothing
+#           at all.
 #
 #         - Newer kernels (Android 17 QPR1 onwards): memfds are labelled
 #           through security_inode_init_security_anon(), carrying the creating

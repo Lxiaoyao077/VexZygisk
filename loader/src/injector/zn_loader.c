@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,12 +85,12 @@ static void *dlopen_via_fd(const char *path, int flags) {
   ssize_t got;
   bool copied = true;
 
-  while ((got = read(fd, buffer, sizeof(buffer))) > 0) {
+  while ((got = TEMP_FAILURE_RETRY(read(fd, buffer, sizeof(buffer)))) > 0) {
     size_t left = (size_t)got;
     const char *cursor = buffer;
 
     while (left > 0) {
-      ssize_t written = write(mem_fd, cursor, left);
+      ssize_t written = TEMP_FAILURE_RETRY(write(mem_fd, cursor, left));
       if (written <= 0) {
         copied = false;
 

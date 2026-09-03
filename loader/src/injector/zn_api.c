@@ -74,9 +74,14 @@ static int zn_plt_hook(void *base_addr, const char *symbol, void *hook_handler, 
     return ZN_FAILED;
   }
 
+  /* INFO: LSPlt only fills the backup when it actually replaced a GOT entry.
+             An unhook and a redundant re-registration leave it NULL while
+             still succeeding, so the result is judged by the commit alone.
+             Reporting those as failures would tell a module that its unhook
+             went wrong exactly when it went right. */
   if (original != NULL) *original = backup;
 
-  return backup ? ZN_SUCCESS : ZN_FAILED;
+  return ZN_SUCCESS;
 }
 
 /* INFO: The Zygisk Next contract allows a single inline hook per address, so

@@ -740,7 +740,7 @@ static void reload_modules(struct Context *restrict context) {
 struct Client {
   int fd;
   struct Context *context;
-  char **argv;
+  char *restrict *argv;
   bool *first_process;
 };
 
@@ -1124,7 +1124,7 @@ static const struct ActionHandler *find_action_handler(enum DaemonSocketAction a
   return NULL;
 }
 
-static void serve_loop(int socket_fd, struct Context *context, char *argv[]) {
+static void serve_loop(int socket_fd, struct Context *context, char *restrict argv[]) {
   bool first_process = true;
 
   while (1) {

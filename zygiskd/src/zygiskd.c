@@ -1124,7 +1124,7 @@ static const struct ActionHandler *find_action_handler(enum DaemonSocketAction a
   return NULL;
 }
 
-static void serve_loop(int socket_fd, struct Context *restrict context, char *restrict argv[]) {
+static void serve_loop(int socket_fd, struct Context *context, char *argv[]) {
   bool first_process = true;
 
   while (1) {

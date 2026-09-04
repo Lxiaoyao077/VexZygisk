@@ -11,9 +11,6 @@
 #include "constants.h"
 #include "root_impl/common.h"
 
-#define CONCAT_(x,y) x##y
-#define CONCAT(x,y) CONCAT_(x,y)
-
 #ifdef __LP64__
   #define LP_SELECT(a, b) b
 #else
@@ -25,22 +22,31 @@
 #endif
 
 #define LOGI(...)                                              \
-  __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); \
-  printf(__VA_ARGS__)
+  do {                                                         \
+    __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); \
+    printf(__VA_ARGS__);                                       \
+  } while (0)
 
 #define LOGW(...)                                                \
-  __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__);   \
-  printf(__VA_ARGS__)
+  do {                                                           \
+    __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__);   \
+    printf(__VA_ARGS__);                                         \
+  } while (0)
 
 #define LOGE(...)                                                \
-  __android_log_print(ANDROID_LOG_ERROR , LOG_TAG, __VA_ARGS__); \
-  printf(__VA_ARGS__)
+  do {                                                           \
+    __android_log_print(ANDROID_LOG_ERROR , LOG_TAG, __VA_ARGS__); \
+    printf(__VA_ARGS__);                                         \
+  } while (0)
 
-/* INFO: Fixed-argument on purpose. A variadic PLOGE("read") passes an empty
-         __VA_ARGS__, which -Wpedantic rejects as ISO C99 requires at least one
-         argument for "...". */
+/* INFO: Fixed-argument on purpose. A variadic PLOGE("read") would pass an
+         empty __VA_ARGS__, which -Wpedantic rejects as ISO C99 requires at
+         least one argument for "...". */
 #define PLOGE(msg) LOGE("%s: %s", (msg), strerror(errno))
 
+/* INFO: Not wrapped in do { } while (0) on purpose: the on_fail argument is
+         instantiated with break, continue or goto, whose meaning would be
+         swallowed by the loop instead of reaching the enclosing statement. */
 #define ASSURE_SIZE_WRITE(area_name, subarea_name, sent_size, expected_size, return_type)                        \
   if (sent_size != (ssize_t)(expected_size)) {                                                                   \
     LOGE("Failed to sent " subarea_name " in " area_name ": Expected %zu, got %zd\n", expected_size, sent_size); \
@@ -54,9 +60,6 @@
                                                                                                                  \
     return_type;                                                                                                 \
   }
-
-#define IS_ISOLATED_SERVICE(uid)      \
-  ((uid) >= 90000 && (uid) < 1000000)
 
 #define write_func_def(type)              \
   ssize_t write_## type(int fd, type val)
@@ -96,8 +99,6 @@ ssize_t write_string(int fd, const char *restrict str);
 ssize_t read_string(int fd, char *restrict buf, size_t buf_size);
 
 bool check_unix_socket(int fd, bool block);
-
-int non_blocking_execv(const char *restrict file, char *const argv[]);
 
 void stringify_root_impl_name(struct root_impl impl, char *restrict output);
 

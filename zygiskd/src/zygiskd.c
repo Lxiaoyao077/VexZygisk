@@ -65,10 +65,11 @@ struct ZnModuleFile {
   #error "Unsupported architecture"
 #endif
 
-/* INFO: A trailing byte tells the monitor whether the module targets Zygisk Next */
-static void send_module_info(const char *name, bool is_zn) {
+/* INFO: A standard Zygisk module entry: the trailing zero byte tells the
+           monitor whether the module targets Zygisk Next. */
+static void send_module_info(const char *name) {
   uint32_t module_name_len = (uint32_t)strlen(name);
-  uint8_t module_type = is_zn ? 1 : 0;
+  uint8_t module_type = 0;
 
   unix_datagram_sendto(CONTROLLER_SOCKET, &module_name_len, sizeof(module_name_len));
   unix_datagram_sendto(CONTROLLER_SOCKET, name, module_name_len);
@@ -213,12 +214,12 @@ static void load_modules(struct Context *restrict context) {
     char *name = entry->d_name;
 
     char disabled[PATH_MAX];
-    snprintf(disabled, PATH_MAX, "/data/adb/modules/%s/disable", name);
+    snprintf(disabled, PATH_MAX, PATH_MODULES_DIR "/%s/disable", name);
 
     if (access(disabled, F_OK) == 0) continue;
 
     char zn_modules[PATH_MAX];
-    snprintf(zn_modules, PATH_MAX, "/data/adb/modules/%s/zn_modules.txt", name);
+    snprintf(zn_modules, PATH_MAX, PATH_MODULES_DIR "/%s/zn_modules.txt", name);
 
     /* INFO: The two mechanisms are served side by side rather than picked
              between, which is what NyaZygisk does and what LSPosed depends on.
@@ -240,7 +241,7 @@ static void load_modules(struct Context *restrict context) {
     }
 
     char so_path[PATH_MAX];
-    snprintf(so_path, PATH_MAX, "/data/adb/modules/%s/zygisk/" ARCH_STR ".so", name);
+    snprintf(so_path, PATH_MAX, PATH_MODULES_DIR "/%s/zygisk/" ARCH_STR ".so", name);
 
     if (access(so_path, R_OK) == -1) continue;
 
@@ -469,15 +470,31 @@ static int exec_companion(char *restrict argv[], const char *restrict tag, const
   snprintf(mode_arg, sizeof(mode_arg), "%s", mode);
 
   char *eargv[] = { process_name, mode_arg, companion_fd_str, NULL };
-  if (non_blocking_execv(ZYGISKD_PATH, eargv) == -1) {
-    LOGE("Failed executing the companion: %s", strerror(errno));
+
+  /* INFO: The parent waitpids on this process, so it must not become the
+            companion itself: fork once more and let the grandchild exec,
+            orphaning the long-lived companion to init. The earlier
+            non_blocking_execv hid this double fork behind a dead pipe. */
+  pid_t inner_pid = fork();
+  if (inner_pid == -1) {
+    LOGE("Failed forking the companion child: %s", strerror(errno));
 
     close(companion_fd);
 
     exit(1);
   }
 
-  exit(0);
+  if (inner_pid == 0) {
+    execv(ZYGISKD_PATH, eargv);
+
+    LOGE("Failed executing the companion: %s", strerror(errno));
+
+    close(companion_fd);
+
+    _exit(1);
+  }
+
+  _exit(0);
 }
 
 /* Spawns the companion of a Zygisk module. The library is already open, its
@@ -713,7 +730,7 @@ static void send_daemon_info(const struct Context *restrict context) {
   unix_datagram_sendto(CONTROLLER_SOCKET, &modules_len, sizeof(modules_len));
 
   for (size_t i = 0; i < context->len; i++) {
-    send_module_info(context->modules[i].name, false);
+    send_module_info(context->modules[i].name);
   }
 
   for (size_t i = 0; i < context->zn_len; i++) {
@@ -729,7 +746,6 @@ static void reload_modules(struct Context *restrict context) {
 
   send_daemon_info(context);
 }
-
 /* INFO: A client that hangs in the middle of an exchange would stall every
          later request, and every zygote fork talks to this daemon. Bound each
          exchange instead of trusting the peer. */
@@ -740,7 +756,7 @@ static void reload_modules(struct Context *restrict context) {
 struct Client {
   int fd;
   struct Context *context;
-  char *restrict *argv;
+  char **argv;
   bool *first_process;
 };
 
@@ -748,6 +764,7 @@ typedef void (*action_handler_t)(struct Client *client);
 
 struct ActionHandler {
   enum DaemonSocketAction action;
+  const char *name;
   action_handler_t handler;
 };
 
@@ -757,11 +774,20 @@ static void handle_zygote_injected(struct Client *client) {
   unix_datagram_sendto(CONTROLLER_SOCKET, &(uint8_t){ ZYGOTE_INJECTED }, sizeof(uint8_t));
 }
 
-/* INFO: A restarted zygote drops every companion and library fd, reload_modules
-         releases them and re-reads the directory. A module installed while the
-         daemon was running is picked up here without a reboot, and one that
-         disappeared is dropped. */
+/* INFO: A restarted zygote drops every companion, the loader asks for them
+         again as it needs them. The module list is re-read here as well, so a
+         module installed while the daemon was running is picked up without a
+         reboot, and one that disappeared is dropped. */
 static void handle_zygote_restart(struct Client *client) {
+  (void) client->fd;
+
+  for (size_t i = 0; i < client->context->len; i++) {
+    if (client->context->modules[i].companion <= -1) continue;
+
+    close(client->context->modules[i].companion);
+    client->context->modules[i].companion = -1;
+  }
+
   reload_modules(client->context);
 }
 
@@ -836,7 +862,7 @@ static void handle_read_modules(struct Client *client) {
 
   for (size_t i = 0; i < clen; i++) {
     char lib_path[PATH_MAX];
-    snprintf(lib_path, PATH_MAX, "/data/adb/modules/%s/zygisk/" ARCH_STR ".so", client->context->modules[i].name);
+    snprintf(lib_path, PATH_MAX, PATH_MODULES_DIR "/%s/zygisk/" ARCH_STR ".so", client->context->modules[i].name);
 
     if (write_string(client->fd, lib_path) == -1) {
       LOGE("Failed writing module path.");
@@ -993,8 +1019,8 @@ static void handle_request_companion_socket(struct Client *client) {
       module->companion = -1;
     }
   } else {
-    LOGE(" - Failed to spawn companion for module \"%s\"", module->name);
-
+    /* INFO: The failure itself was already logged when the spawn was
+               attempted; only the rejection is left to send here. */
     ret = write_uint8_t(client->fd, 0);
     ASSURE_SIZE_WRITE("RequestCompanionSocket", "response", ret, sizeof(uint8_t), return);
   }
@@ -1019,13 +1045,13 @@ static void handle_get_module_dir(struct Client *client) {
 
   int fd = open(module_dir, O_RDONLY);
   if (fd == -1) {
-    LOGE("Failed opening module directory \"%s\": %s", module_dir, strerror(errno));
+    PLOGE("Failed opening module directory");
 
     return;
   }
 
   if (write_fd(client->fd, fd) == -1) {
-    LOGE("Failed sending module directory \"%s\" fd: %s", module_dir, strerror(errno));
+    PLOGE("Failed sending module directory fd");
 
     close(fd);
 
@@ -1036,9 +1062,9 @@ static void handle_get_module_dir(struct Client *client) {
 }
 
 static void handle_update_mount_namespace(struct Client *client) {
-  pid_t pid = 0;
-  ssize_t ret = read_uint32_t(client->fd, (uint32_t *)&pid);
-  ASSURE_SIZE_READ("UpdateMountNamespace", "pid", ret, sizeof(pid), return);
+  uint32_t target_process = 0;
+  ssize_t ret = read_uint32_t(client->fd, &target_process);
+  ASSURE_SIZE_READ("UpdateMountNamespace", "pid", ret, sizeof(target_process), return);
 
   uint8_t mns_state = 0;
   ret = read_uint8_t(client->fd, &mns_state);
@@ -1050,9 +1076,9 @@ static void handle_update_mount_namespace(struct Client *client) {
 
   /* Only the requested namespace is handed back; the loader never asks
      for the mounted one, so there is no reason to prime its cache here. */
-  int ns_fd = save_mns_fd(pid, (enum MountNamespaceState)mns_state);
+  int ns_fd = save_mns_fd((pid_t)target_process, (enum MountNamespaceState)mns_state);
   if (ns_fd == -1) {
-    LOGE("Failed to save mount namespace fd for pid %d: %s", pid, strerror(errno));
+    LOGE("Failed to save mount namespace fd for pid %u: %s", target_process, strerror(errno));
 
     ret = write_uint32_t(client->fd, (uint32_t)0);
     ASSURE_SIZE_WRITE("UpdateMountNamespace", "ns_fd", ret, sizeof(ns_fd), return);
@@ -1103,17 +1129,17 @@ static void handle_remove_module(struct Client *client) {
 /* INFO: Ordered by action value; the table is small enough that a linear scan
          costs less than the socket round trip around it. */
 static const struct ActionHandler kActionHandlers[] = {
-  { ZygoteInjected,         handle_zygote_injected         },
-  { GetProcessFlags,        handle_get_process_flags       },
-  { GetInfo,                handle_get_info                },
-  { ReadModules,            handle_read_modules            },
-  { RequestCompanionSocket, handle_request_companion_socket },
-  { GetModuleDir,           handle_get_module_dir          },
-  { ZygoteRestart,          handle_zygote_restart          },
-  { UpdateMountNamespace,   handle_update_mount_namespace  },
-  { RemoveModule,           handle_remove_module           },
-  { ReadZnModules,          handle_read_zn_modules         },
-  { SpawnZnCompanion,       handle_spawn_zn_companion      }
+  { ZygoteInjected,         "ZygoteInjected",         handle_zygote_injected         },
+  { GetProcessFlags,        "GetProcessFlags",        handle_get_process_flags       },
+  { GetInfo,                "GetInfo",                handle_get_info                },
+  { ReadModules,            "ReadModules",            handle_read_modules            },
+  { RequestCompanionSocket, "RequestCompanionSocket", handle_request_companion_socket },
+  { GetModuleDir,           "GetModuleDir",           handle_get_module_dir          },
+  { ZygoteRestart,          "ZygoteRestart",          handle_zygote_restart          },
+  { UpdateMountNamespace,   "UpdateMountNamespace",   handle_update_mount_namespace  },
+  { RemoveModule,           "RemoveModule",           handle_remove_module           },
+  { ReadZnModules,          "ReadZnModules",          handle_read_zn_modules         },
+  { SpawnZnCompanion,       "SpawnZnCompanion",       handle_spawn_zn_companion      }
 };
 
 static const struct ActionHandler *find_action_handler(enum DaemonSocketAction action) {
@@ -1124,7 +1150,7 @@ static const struct ActionHandler *find_action_handler(enum DaemonSocketAction a
   return NULL;
 }
 
-static void serve_loop(int socket_fd, struct Context *context, char *restrict argv[]) {
+static void serve_loop(int socket_fd, struct Context *restrict context, char *restrict argv[]) {
   bool first_process = true;
 
   while (1) {
@@ -1141,13 +1167,8 @@ static void serve_loop(int socket_fd, struct Context *context, char *restrict ar
     /* INFO: Bound a single exchange so a stuck client cannot stall the zygote
              forks waiting behind it. */
     struct timeval timeout = { .tv_sec = DAEMON_CLIENT_TIMEOUT_SECS, .tv_usec = 0 };
-    if (setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, (socklen_t)sizeof(timeout)) == -1) {
-      PLOGE("setsockopt SO_RCVTIMEO");
-    }
-
-    if (setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, (socklen_t)sizeof(timeout)) == -1) {
-      PLOGE("setsockopt SO_SNDTIMEO");
-    }
+    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
     uint8_t action8 = 0;
     ssize_t len = read_uint8_t(client_fd, &action8);
@@ -1188,14 +1209,12 @@ static void serve_loop(int socket_fd, struct Context *context, char *restrict ar
     close(client_fd);
   }
 }
-
 void zygiskd_start(char *restrict argv[]) {
   /* load_modules and the socket handlers free through free_modules, so the
      context must start as a clean zeroed slate on every path. */
   struct Context context = { 0 };
 
   load_modules(&context);
-
   send_daemon_info(&context);
 
   LOGI("Sent root implementation and modules information to controller socket");

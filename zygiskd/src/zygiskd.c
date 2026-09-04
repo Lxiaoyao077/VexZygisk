@@ -756,7 +756,7 @@ static void reload_modules(struct Context *restrict context) {
 struct Client {
   int fd;
   struct Context *context;
-  char **argv;
+  char *restrict *argv;
   bool *first_process;
 };
 
@@ -1213,6 +1213,9 @@ void zygiskd_start(char *restrict argv[]) {
   /* load_modules and the socket handlers free through free_modules, so the
      context must start as a clean zeroed slate on every path. */
   struct Context context = { 0 };
+
+  struct root_impl impl;
+  get_impl(&impl);
 
   load_modules(&context);
   send_daemon_info(&context);

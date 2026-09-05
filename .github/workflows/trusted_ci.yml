@@ -19,6 +19,12 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Protocol consistency
+        # INFO: The loader and the daemon implement their own halves of the
+        #       wire protocol; this fails fast if one side edits the action
+        #       enum or the helper surface without the other.
+        run: python3 tests/host/check_protocol.py
+
       - name: Host unit tests
         # INFO: The loader cannot run on this host, but its ELF reader can, and
         #       so can the mini-debug decompressor. A broken parse or a wrong

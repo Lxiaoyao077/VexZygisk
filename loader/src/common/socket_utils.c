@@ -174,6 +174,15 @@ char *read_string(int fd) {
     return NULL;
   }
 
+  /* INFO: A length is only sane up to a path's worth of bytes; anything
+            beyond it is a desynchronised stream, and trusting it would let
+            the allocation grow without bound. */
+  if (str_len > (size_t)(1u << 20)) {
+    LOGE("Failed to read string: Length %zu is out of bounds.\n", str_len);
+
+    return NULL;
+  }
+
   char *buf = malloc(str_len + 1);
   if (buf == NULL) {
     PLOGE("allocate memory for string");

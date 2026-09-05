@@ -674,6 +674,12 @@ void sigchld_listener_callback() {
         LOGW("daemon%s pid %d exited: %s", MONITOR_ABI, pid, status_str);
         status.daemon_running = false;
 
+        /* INFO: Resetting the pid lets ensure_daemon_created fork a fresh
+                  daemon at the next zygote start instead of reporting "already
+                  running" forever; without it a single daemon crash disabled
+                  injection until reboot. */
+        status.daemon_pid = -1;
+
         if (!status.daemon_error_info) {
           status.daemon_error_info = strdup(status_str);
           if (!status.daemon_error_info) {
@@ -920,6 +926,49 @@ static void build_module_text(void) {
   snprintf(module_text + off, sizeof(module_text) - off, " · ");
 }
 
+/* INFO: JSON string writer used by the state file below; quotes, backslashes
+         and control characters would otherwise produce invalid JSON. Writes
+         at most cap - 1 bytes plus the terminator. */
+static void json_escape_into(char *dst, size_t cap, const char *src) {
+  size_t off = 0;
+
+  for (const unsigned char *cursor = (const unsigned char *)src; *cursor != '\0' && off + 1 < cap; cursor++) {
+    unsigned char c = *cursor;
+    const char *escape = NULL;
+    char short_escape[3] = { 0 };
+
+    switch (c) {
+      case '"': escape = "\\\""; break;
+      case '\\': escape = "\\\\"; break;
+      case '\n': escape = "\\n"; break;
+      case '\r': escape = "\\r"; break;
+      case '\t': escape = "\\t"; break;
+      default: {
+        if (c < 0x20) {
+          snprintf(short_escape, sizeof(short_escape), "\\u%04x", (unsigned)c);
+          escape = short_escape;
+        }
+
+        break;
+      }
+    }
+
+    if (escape != NULL) {
+      size_t escape_len = strlen(escape);
+      if (off + escape_len >= cap) break;
+
+      memcpy(dst + off, escape, escape_len);
+      off += escape_len;
+
+      continue;
+    }
+
+    dst[off++] = (char)c;
+  }
+
+  dst[off] = '\0';
+}
+
 static bool update_status(const char *message) {
   build_module_text();
 
@@ -994,28 +1043,43 @@ static bool update_status(const char *message) {
       return false;
     }
 
+    char root_impl_json[256];
+    json_escape_into(root_impl_json, sizeof(root_impl_json), environment_information.root_impl);
+
     fprintf(json, "{\n");
-    fprintf(json, "  \"root\": \"%s\",\n", environment_information.root_impl);
+    fprintf(json, "  \"root\": \"%s\",\n", root_impl_json);
 
     fprintf(json, "  \"monitor\": {\n");
     fprintf(json, "    \"state\": %d", tracing_state);
-    if (monitor_stop_reason) fprintf(json, ",\n    \"reason\": \"%s\"\n", monitor_stop_reason);
-    else fprintf(json, "\n");
+
+    if (monitor_stop_reason) {
+      char reason_json[256];
+      json_escape_into(reason_json, sizeof(reason_json), monitor_stop_reason);
+
+      fprintf(json, ",\n    \"reason\": \"%s\"\n", reason_json);
+    } else fprintf(json, "\n");
 
     if (status.supported) fprintf(json, "  },\n");
     else fprintf(json, "  }\n");
 
     if (status.supported) {
+      char reason_json[256];
+      if (status.daemon_error_info) json_escape_into(reason_json, sizeof(reason_json), status.daemon_error_info);
+
       fprintf(json, "  \"rezygiskd\": {\n");
       fprintf(json, "    \"%s\": {\n", MONITOR_ABI);
       fprintf(json, "      \"state\": %d,\n", status.daemon_running);
-      if (status.daemon_error_info) fprintf(json, "      \"reason\": \"%s\",\n", status.daemon_error_info);
+      if (status.daemon_error_info) fprintf(json, "      \"reason\": \"%s\",\n", reason_json);
       fprintf(json, "      \"modules\": [");
 
       if (environment_information.modules) for (uint32_t i = 0; i < environment_information.modules_len; i++) {
         if (i > 0) fprintf(json, ", ");
+
+        char module_json[256];
+        json_escape_into(module_json, sizeof(module_json), environment_information.modules[i] ? environment_information.modules[i] : "");
+
         fprintf(json, "{\"id\": \"%s\", \"next\": %s, \"companion\": %s",
-                environment_information.modules[i],
+                module_json,
                 environment_information.modules_zn[i] ? "true" : "false",
                 environment_information.modules_companion[i] ? "true" : "false");
 
@@ -1023,7 +1087,11 @@ static bool update_status(const char *message) {
           fprintf(json, ", \"targets\": [");
           for (uint32_t t = 0; t < environment_information.modules_targets_len[i]; t++) {
             if (t > 0) fprintf(json, ", ");
-            fprintf(json, "\"%s\"", environment_information.modules_targets[i][t]);
+
+            char target_json[256];
+            json_escape_into(target_json, sizeof(target_json), environment_information.modules_targets[i][t] ? environment_information.modules_targets[i][t] : "");
+
+            fprintf(json, "\"%s\"", target_json);
           }
           fprintf(json, "]");
         }

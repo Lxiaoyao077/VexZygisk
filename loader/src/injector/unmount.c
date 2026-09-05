@@ -79,43 +79,36 @@ static bool mount_list_reserve(struct mount_list *list, size_t wanted) {
 }
 
 /* INFO: One mountinfo line, split on the " - " separator, which is the only
-         delimiter that cannot appear inside a field:
+         delimiter that cannot appear inside a field. The separator is cut in
+         place so the head is never copied into a fixed buffer — long paths
+         used to be dropped as "oversized" and their mounts silently skipped:
 
            36 35 98:0 /root /target rw,... - type source rw,...
 
          The mount id has to be parsed out because nested mounts only come
          down in the reverse order of their ids. */
-static bool mount_info_parse(const char *line, struct mount_info *out) {
-  const char *separator = strstr(line, " - ");
+static bool mount_info_parse(char *line, struct mount_info *out) {
+  char *separator = strstr(line, " - ");
   if (separator == NULL) {
     LOGV("Skipping malformed mountinfo line (no separator)");
 
     return false;
   }
 
-  char head[1024];
-  size_t head_len = (size_t)(separator - line);
-  if (head_len >= sizeof(head)) {
-    LOGW("Skipping oversized mountinfo line");
-
-    return false;
-  }
-
-  memcpy(head, line, head_len);
-  head[head_len] = '\0';
+  *separator = '\0';
 
   /* INFO: The parent id and the "major:minor" device are skipped, nothing
             here needs them. */
   unsigned int id = 0;
-  char root[512], target[512], source[512], type[128];
+  char root[4096], target[4096], source[4096], type[128];
 
-  if (sscanf(head, "%u %*u %*u:%*u %511s %511s", &id, root, target) != 3) {
+  if (sscanf(line, "%u %*u %*u:%*u %4095s %4095s", &id, root, target) != 3) {
     LOGV("Skipping malformed mountinfo line: %s", line);
 
     return false;
   }
 
-  if (sscanf(separator + 3, "%127s %511s", type, source) != 2) {
+  if (sscanf(separator + 3, "%127s %4095s", type, source) != 2) {
     LOGV("Skipping mountinfo line without a source: %s", line);
 
     return false;

@@ -5,6 +5,56 @@ on:
     branches: [ main ]
 
 jobs:
+  test:
+    name: Host unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # INFO: The host tests exercise in-tree sources only (the ELF reader,
+        #       the mountinfo and APatch parsers), so neither the submodules
+        #       nor the history of the build job are needed here. Keeping this
+        #       job separate lets a broken test fail fast and loudly without
+        #       costing the archives, and vice versa.
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Host unit tests
+        # INFO: The loader cannot run on this host, but its ELF reader can, and
+        #       so can the mini-debug decompressor. A broken parse or a wrong
+        #       symbol then fails the build instead of showing up only on a
+        #       device as a module that silently does not load.
+        run: |
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+             -Itests/host -Iloader/src/include -Iloader/src/common \
+             -Iloader/src/external/lzma \
+             -c loader/src/common/elf_util.c -o /tmp/elf_util.o
+          cc -std=c18 -D_GNU_SOURCE -w \
+             -Iloader/src/external/lzma \
+             -c loader/src/external/lzma/LzmaDec.c -o /tmp/lzma_dec.o
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+             -Itests/host -Iloader/src/include -Iloader/src/common \
+             -Iloader/src/external/lzma \
+             tests/host/test_elf_util.c /tmp/elf_util.o /tmp/lzma_dec.o \
+             -o /tmp/test_elf_util
+          python3 tests/host/make_debugdata.py /tmp/debugdata
+          /tmp/test_elf_util /tmp/debugdata /tmp/test_elf_util
+
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+             -Itests/host -Iloader/src/include \
+             tests/host/test_unmount.c -o /tmp/test_unmount
+          /tmp/test_unmount
+
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror -DROOT_IMPL_APATCH \
+             -Itests/host -Iloader/src/include \
+             tests/host/test_unmount.c -o /tmp/test_unmount_apatch
+          /tmp/test_unmount_apatch
+
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+             -Itests/host -Izygiskd/src -Izygiskd/src/root_impl \
+             tests/host/test_apatch.c -o /tmp/test_apatch
+          /tmp/test_apatch
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -78,42 +128,6 @@ jobs:
 
           sys.exit(1 if failed else 0)
           PY
-
-      - name: Host unit tests
-        # INFO: The loader cannot run on this host, but its ELF reader can, and
-        #       so can the mini-debug decompressor. A broken parse or a wrong
-        #       symbol then fails the build instead of showing up only on a
-        #       device as a module that silently does not load.
-        run: |
-          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
-             -Itests/host -Iloader/src/include -Iloader/src/common \
-             -Iloader/src/external/lzma \
-             -c loader/src/common/elf_util.c -o /tmp/elf_util.o
-          cc -std=c18 -D_GNU_SOURCE -w \
-             -Iloader/src/external/lzma \
-             -c loader/src/external/lzma/LzmaDec.c -o /tmp/lzma_dec.o
-          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
-             -Itests/host -Iloader/src/include -Iloader/src/common \
-             -Iloader/src/external/lzma \
-             tests/host/test_elf_util.c /tmp/elf_util.o /tmp/lzma_dec.o \
-             -o /tmp/test_elf_util
-          python3 tests/host/make_debugdata.py /tmp/debugdata
-          /tmp/test_elf_util /tmp/debugdata /tmp/test_elf_util
-
-          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
-             -Itests/host -Iloader/src/include \
-             tests/host/test_unmount.c -o /tmp/test_unmount
-          /tmp/test_unmount
-
-          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror -DROOT_IMPL_APATCH \
-             -Itests/host -Iloader/src/include \
-             tests/host/test_unmount.c -o /tmp/test_unmount_apatch
-          /tmp/test_unmount_apatch
-
-          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
-             -Itests/host -Izygiskd/src -Izygiskd/src/root_impl \
-             tests/host/test_apatch.c -o /tmp/test_apatch
-          /tmp/test_apatch
 
       - name: Generate update.json
         # INFO: Built here rather than committed by hand so it can never drift
@@ -197,7 +211,6 @@ jobs:
               print(path)
               print(json.dumps(update, indent=2))
           PY
-
       - name: Upload update.json
         uses: actions/upload-artifact@v7
         with:

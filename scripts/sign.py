@@ -49,9 +49,14 @@ def sign_machikado(module_dir: str, sig_name: str, abi: str, is_64bit: bool, pri
   #         and use their virtual/relative path as the name in the signature.
   entries = []
 
-  # INFO: The files where virtual = real
+  # INFO: The files where virtual = real. A name that this module does not
+  #       ship (service.sh) is skipped rather than read, which would abort
+  #       the whole build; the verifier walks the files that are there.
   for fname in ["module.prop", "rezygisk.sh", "sepolicy.rule", "post-fs-data.sh", "service.sh", "uninstall.sh"]:
     vpath = root / fname
+    if not vpath.is_file():
+      continue
+
     entries.append((str(vpath), fname, str(vpath)))
 
   # INFO: lib(64)/libzygisk.so -> lib/{abi}/libzygisk.so
@@ -72,9 +77,14 @@ def sign_machikado(module_dir: str, sig_name: str, abi: str, is_64bit: bool, pri
   # INFO: Sort by virtual path
   entries.sort(key=lambda e: e[0].replace("\\", "/"))
 
-  # INFO: Accumulate all sign data
+  # INFO: Accumulate all sign data. Entries whose real file is absent (an
+  #       architecture that was not built, service.sh) are skipped: reading
+  #       them would abort the whole build.
   sign_data = bytearray()
   for _, vname, rpath in entries:
+    if not Path(rpath).is_file():
+      continue
+
     sign_data.extend(file_sign_data(vname, rpath))
 
   # INFO: Sign with Ed25519

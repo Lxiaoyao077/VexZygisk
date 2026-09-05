@@ -156,9 +156,19 @@ static void *dlopen_via_fd(const char *path, int flags) {
   info.library_fd = mem_fd;
 
   void *lib = android_dlopen_ext(path, flags, &info);
-  if (lib == NULL) LOGE("dlopen %s via memfd failed: %s", path, dlerror());
+  if (lib == NULL) {
+    LOGE("dlopen %s via memfd failed: %s", path, dlerror());
 
-  /* INFO: The memfd stays open either way, see above. */
+    /* INFO: The memfd only has to stay open once the linker owns the
+              library — bionic may keep reading it for its lifetime, and it
+              does not take ownership of USE_LIBRARY_FD descriptors. A failed
+              dlopen leaves nothing behind that could read it, so closing
+              here is what keeps the failure paths leak-free. */
+    close(mem_fd);
+
+    return NULL;
+  }
+
   return lib;
 }
 
@@ -374,6 +384,11 @@ static int spawn_companion(const char *lib_path) {
   return sockets[0];
 }
 
+/* INFO: Failure symmetry, reviewed: every branch that gives up after a
+         successful dlopen releases the handle with dlclose and closes the
+         handed-over module_fd; a dlopen itself failing releases whatever it
+         created (see dlopen_from_fd / dlopen_via_fd). Past onModuleLoaded the
+         library is deliberately left loaded for the life of the process. */
 static bool load_entry(struct zn_entry *entry, void **lib_handle, int module_fd) {
   void *lib = NULL;
 

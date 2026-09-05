@@ -970,6 +970,11 @@ static bool load_modules_only(void) {
     return false;
   }
 
+  /* INFO: Failure symmetry, reviewed: csoloader keeps no reference count,
+            so a load that fails inside csoloader_load has mapped nothing and
+            needs no release, while a library that loads but then misses its
+            entry point is explicitly csoloader_unload'ed below — the same
+            discipline the Zygisk Next path applies with dlclose. */
   /* INFO: The daemon compacts its list on every RemoveModule, so each removal
             shifts the modules that follow one slot to the left. The index
             reported to it is therefore offset by the removals already made;

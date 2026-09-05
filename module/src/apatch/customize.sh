@@ -59,6 +59,12 @@ extract "$ZIPFILE" 'post-fs-data.sh' "$MODPATH"
 extract "$ZIPFILE" 'uninstall.sh'    "$MODPATH"
 extract "$ZIPFILE" 'rezygisk.sh' "/data/adb/post-fs-data.d/"
 
+# INFO: The KernelSU flavour copies rezygisk.sh into post-mount.d as well, a
+#         stage the APatch flavour never uses. A switch from one flavour to
+#         the other would otherwise leave that copy running at every boot,
+#         resetting module.prop to a stale pristine state.
+rm -f /data/adb/post-mount.d/rezygisk.sh
+
 # INFO: APatch resolves module sepolicy.rule on the next boot through its own
 #         boot stage, so there is no install-time policy check as KernelSU
 #         does; the rule simply ships with the module.

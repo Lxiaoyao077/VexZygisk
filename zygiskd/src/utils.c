@@ -474,7 +474,7 @@ bool check_unix_socket(int fd, bool block) {
 void stringify_root_impl_name(struct root_impl impl, char *restrict output) {
 #ifdef ROOT_IMPL_APATCH
   switch (impl.impl) {
-    case APatch: {
+    case RootAPatch: {
       strcpy(output, "APatch");
 
       break;
@@ -482,7 +482,7 @@ void stringify_root_impl_name(struct root_impl impl, char *restrict output) {
   }
 #else
   switch (impl.impl) {
-    case KernelSU: {
+    case RootKernelSU: {
       strcpy(output, "KernelSU");
 
       break;

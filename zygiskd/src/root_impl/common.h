@@ -12,11 +12,11 @@
          other root solution at all. */
 #ifdef ROOT_IMPL_APATCH
 enum root_impls {
-  APatch
+  RootAPatch
 };
 #else
 enum root_impls {
-  KernelSU
+  RootKernelSU
 };
 #endif
 
@@ -28,7 +28,19 @@ struct root_impl {
   enum root_impls impl;
 };
 
-#define LONGEST_ROOT_IMPL_NAME sizeof("KernelSU")
+/* INFO: The display name and the kind live next to the enum so the length
+         can be derived from the one string that is actually compiled in —
+         a fixed sizeof("KernelSU") would silently overflow once a root
+         with a longer name shows up. */
+#ifdef ROOT_IMPL_APATCH
+  #define ROOT_IMPL_KIND RootAPatch
+  #define ROOT_IMPL_NAME "APatch"
+#else
+  #define ROOT_IMPL_KIND RootKernelSU
+  #define ROOT_IMPL_NAME "KernelSU"
+#endif
+
+#define LONGEST_ROOT_IMPL_NAME sizeof(ROOT_IMPL_NAME)
 
 void root_impls_setup(void);
 

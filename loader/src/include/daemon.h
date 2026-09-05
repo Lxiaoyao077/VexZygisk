@@ -42,11 +42,11 @@ struct zn_module_file {
          expand the enumerator to 1. */
 #ifdef ROOT_IMPL_APATCH
 enum root_impl {
-  ROOT_IMPL_APD
+  ROOT_APATCH
 };
 #else
 enum root_impl {
-  ROOT_IMPL_KERNELSU
+  ROOT_KERNELSU
 };
 #endif
 

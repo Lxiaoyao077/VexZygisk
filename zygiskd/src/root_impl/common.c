@@ -13,16 +13,12 @@
   #define ROOT_UID_GRANTED_ROOT ap_uid_granted_root
   #define ROOT_UID_SHOULD_UMOUNT ap_uid_should_umount
   #define ROOT_UID_IS_MANAGER ap_uid_is_manager
-  #define ROOT_IMPL_KIND APatch
-  #define ROOT_IMPL_NAME "APatch"
 #else
   #include "kernelsu.h"
   #define ROOT_GET_EXISTENCE ksu_get_existence
   #define ROOT_UID_GRANTED_ROOT ksu_uid_granted_root
   #define ROOT_UID_SHOULD_UMOUNT ksu_uid_should_umount
   #define ROOT_UID_IS_MANAGER ksu_uid_is_manager
-  #define ROOT_IMPL_KIND KernelSU
-  #define ROOT_IMPL_NAME "KernelSU"
 #endif
 
 static struct root_impl impl;

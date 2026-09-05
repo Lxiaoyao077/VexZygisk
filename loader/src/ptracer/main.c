@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
 
 #ifdef ROOT_IMPL_APATCH
     switch (info.root_impl) {
-      case ROOT_IMPL_APD: {
+      case ROOT_APATCH: {
         printf("Root implementation: APatch\n");
 
         break;
@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
     }
 #else
     switch (info.root_impl) {
-      case ROOT_IMPL_KERNELSU: {
+      case ROOT_KERNELSU: {
         printf("Root implementation: KernelSU\n");
 
         break;

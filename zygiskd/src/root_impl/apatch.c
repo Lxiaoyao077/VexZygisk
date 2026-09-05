@@ -133,6 +133,11 @@ static size_t ap_read_package_config(struct ap_package_entry *out, size_t max_ro
       long allow = strtol(fields[2], &endptr, 10);
       if (*endptr != '\0') continue;
 
+      /* INFO: The numeric columns were only validated above, the boolean
+                value is re-read from the raw field. */
+      (void) exclude;
+      (void) allow;
+
       endptr = NULL;
       long long uid = strtoll(fields[3], &endptr, 10);
       if (*endptr != '\0' || uid < 0 || uid > (long long)UINT_MAX) continue;

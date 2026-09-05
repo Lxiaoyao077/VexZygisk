@@ -116,7 +116,7 @@ void rezygiskd_get_info(struct rezygisk_info *info) {
   safe_read(read_uint32_t(fd, &flags), "info flags", return);
 
 #ifdef ROOT_IMPL_APATCH
-  info->root_impl = ROOT_IMPL_APATCH;
+  info->root_impl = ROOT_IMPL_APD;
 #else
   info->root_impl = ROOT_IMPL_KERNELSU;
 #endif

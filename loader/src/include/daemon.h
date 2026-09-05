@@ -34,9 +34,12 @@ struct zn_module_file {
   int fd;
 };
 
+/* INFO: The flavour this loader was built for. The member names deliberately
+         differ from the ROOT_IMPL_APATCH compile macro that selects it: a
+         -D would otherwise expand the enumerator to 1. */
 enum root_impl {
   ROOT_IMPL_KERNELSU,
-  ROOT_IMPL_APATCH
+  ROOT_IMPL_APD
 };
 
 struct rezygisk_info {

@@ -91,7 +91,7 @@ int main(int argc, char **argv) {
 
         break;
       }
-      case ROOT_IMPL_APATCH: {
+      case ROOT_IMPL_APD: {
         printf("Root implementation: APatch\n");
 
         break;

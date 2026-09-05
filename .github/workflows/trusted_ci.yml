@@ -65,9 +65,22 @@ jobs:
           import glob
           import json
           import os
+          import re
           import subprocess
 
-          archive = sorted(glob.glob("build/out/VexZygisk-v*-release.zip"))[-1]
+          archives = glob.glob("build/out/VexZygisk-v*-release.zip")
+          if not archives:
+              raise SystemExit("no release archive found")
+
+          # INFO: Lexicographic order would pick v2.1.9 over v2.1.10, so the
+          #       newest archive is the one with the highest versionCode.
+          def archive_version_code(path):
+              match = re.search(r"-v[^-]+-(\d+)-[0-9a-f]+-release\.zip$", os.path.basename(path))
+              if not match:
+                  raise SystemExit(f"cannot parse versionCode from {path}")
+              return int(match.group(1))
+
+          archive = max(archives, key=archive_version_code)
           name = os.path.basename(archive)
 
           # VexZygisk-<version>-<versionCode>-<commit>-release.zip

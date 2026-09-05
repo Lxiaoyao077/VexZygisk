@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "constants.h"
+#include "zygisk_paths.h"
 #include "root_impl/common.h"
 #include "utils.h"
 
@@ -71,11 +72,6 @@ struct ZnCompanion {
   int fd;
 };
 
-#define PATH_MODULES_DIR "/data/adb/modules"
-#define TMP_PATH "/data/adb/rezygisk"
-#define CONTROLLER_SOCKET TMP_PATH "/init_monitor"
-#define PATH_CP_NAME TMP_PATH "/" LP_SELECT("cp32.sock", "cp64.sock")
-#define ZYGISKD_PATH "/data/adb/modules/rezygisk/bin/zygiskd" LP_SELECT("32", "64")
 
 #ifdef __aarch64__
   #define ARCH_STR "arm64-v8a"
@@ -91,9 +87,9 @@ static void send_module_info(const char *name) {
   uint32_t module_name_len = (uint32_t)strlen(name);
   uint8_t module_type = 0;
 
-  unix_datagram_sendto(CONTROLLER_SOCKET, &module_name_len, sizeof(module_name_len));
-  unix_datagram_sendto(CONTROLLER_SOCKET, name, module_name_len);
-  unix_datagram_sendto(CONTROLLER_SOCKET, &module_type, sizeof(module_type));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &module_name_len, sizeof(module_name_len));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, name, module_name_len);
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &module_type, sizeof(module_type));
 }
 
 /* INFO: Zygisk Next modules also carry the companion flag and every target of
@@ -104,16 +100,16 @@ static void send_zn_module_info(const struct ZnModule *module) {
   uint8_t companion = module->companion ? 1 : 0;
   uint32_t targets_len = (uint32_t)module->targets_len;
 
-  unix_datagram_sendto(CONTROLLER_SOCKET, &module_name_len, sizeof(module_name_len));
-  unix_datagram_sendto(CONTROLLER_SOCKET, module->name, module_name_len);
-  unix_datagram_sendto(CONTROLLER_SOCKET, &module_type, sizeof(module_type));
-  unix_datagram_sendto(CONTROLLER_SOCKET, &companion, sizeof(companion));
-  unix_datagram_sendto(CONTROLLER_SOCKET, &targets_len, sizeof(targets_len));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &module_name_len, sizeof(module_name_len));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, module->name, module_name_len);
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &module_type, sizeof(module_type));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &companion, sizeof(companion));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &targets_len, sizeof(targets_len));
 
   for (size_t i = 0; i < module->targets_len; i++) {
     uint32_t target_len = (uint32_t)strlen(module->targets[i]);
-    unix_datagram_sendto(CONTROLLER_SOCKET, &target_len, sizeof(target_len));
-    unix_datagram_sendto(CONTROLLER_SOCKET, module->targets[i], target_len);
+    unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &target_len, sizeof(target_len));
+    unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, module->targets[i], target_len);
   }
 }
 
@@ -195,7 +191,7 @@ static bool add_zn_module(struct Context *restrict context, const char *name) {
   module->targets_len = 0;
 
   char module_dir[PATH_MAX];
-  snprintf(module_dir, PATH_MAX, "%s/%s", PATH_MODULES_DIR, name);
+  snprintf(module_dir, PATH_MAX, "%s/%s", ZYGISK_MODULES_DIR, name);
 
   parse_zn_module_file(module_dir, module);
 
@@ -214,9 +210,9 @@ static void load_modules(struct Context *restrict context) {
   context->zn_len = 0;
   context->zn_modules = NULL;
 
-  DIR *dir = opendir(PATH_MODULES_DIR);
+  DIR *dir = opendir(ZYGISK_MODULES_DIR);
   if (dir == NULL) {
-    LOGE("Failed opening modules directory: %s.", PATH_MODULES_DIR);
+    LOGE("Failed opening modules directory: %s.", ZYGISK_MODULES_DIR);
 
     return;
   }
@@ -234,12 +230,12 @@ static void load_modules(struct Context *restrict context) {
     char *name = entry->d_name;
 
     char disabled[PATH_MAX];
-    snprintf(disabled, PATH_MAX, PATH_MODULES_DIR "/%s/disable", name);
+    snprintf(disabled, PATH_MAX, ZYGISK_MODULES_DIR "/%s/disable", name);
 
     if (access(disabled, F_OK) == 0) continue;
 
     char zn_modules[PATH_MAX];
-    snprintf(zn_modules, PATH_MAX, PATH_MODULES_DIR "/%s/zn_modules.txt", name);
+    snprintf(zn_modules, PATH_MAX, ZYGISK_MODULES_DIR "/%s/zn_modules.txt", name);
 
     /* INFO: The two mechanisms are served side by side rather than picked
              between, which is what NyaZygisk does and what LSPosed depends on.
@@ -261,7 +257,7 @@ static void load_modules(struct Context *restrict context) {
     }
 
     char so_path[PATH_MAX];
-    snprintf(so_path, PATH_MAX, PATH_MODULES_DIR "/%s/zygisk/" ARCH_STR ".so", name);
+    snprintf(so_path, PATH_MAX, ZYGISK_MODULES_DIR "/%s/zygisk/" ARCH_STR ".so", name);
 
     if (access(so_path, R_OK) == -1) continue;
 
@@ -567,7 +563,7 @@ static int exec_companion(char *restrict argv[], const char *restrict tag, const
   }
 
   if (inner_pid == 0) {
-    execv(ZYGISKD_PATH, eargv);
+    execv(ZYGISKD_BIN, eargv);
 
     LOGE("Failed executing the companion: %s", strerror(errno));
 
@@ -693,9 +689,9 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 
   size_t capacity = 0;
 
-  DIR *dir = opendir(PATH_MODULES_DIR);
+  DIR *dir = opendir(ZYGISK_MODULES_DIR);
   if (dir == NULL) {
-    LOGE("Failed opening %s: %s", PATH_MODULES_DIR, strerror(errno));
+    LOGE("Failed opening %s: %s", ZYGISK_MODULES_DIR, strerror(errno));
 
     return false;
   }
@@ -706,7 +702,7 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
     if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 || strcmp(entry->d_name, "rezygisk") == 0) continue;
 
     char module_dir[PATH_MAX];
-    snprintf(module_dir, PATH_MAX, "%s/%s", PATH_MODULES_DIR, entry->d_name);
+    snprintf(module_dir, PATH_MAX, "%s/%s", ZYGISK_MODULES_DIR, entry->d_name);
 
     char disabled[PATH_MAX];
     snprintf(disabled, PATH_MAX, "%s/disable", module_dir);
@@ -790,7 +786,7 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 static int create_daemon_socket(void) {
   set_socket_create_context("u:r:zygote:s0");
 
-  return unix_listener_from_path(PATH_CP_NAME);
+  return unix_listener_from_path(ZYGISK_CP_SOCKET);
 }
 
 /* INFO: Pushes the root implementation and the module list to the controller
@@ -806,10 +802,10 @@ static void send_daemon_info(const struct Context *restrict context) {
   uint32_t root_impl_len = (uint32_t)strlen(impl_name);
   uint32_t modules_len = (uint32_t)(context->len + context->zn_len);
 
-  unix_datagram_sendto(CONTROLLER_SOCKET, &(uint8_t){ DAEMON_SET_INFO }, sizeof(uint8_t));
-  unix_datagram_sendto(CONTROLLER_SOCKET, &root_impl_len, sizeof(root_impl_len));
-  unix_datagram_sendto(CONTROLLER_SOCKET, impl_name, root_impl_len);
-  unix_datagram_sendto(CONTROLLER_SOCKET, &modules_len, sizeof(modules_len));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &(uint8_t){ DAEMON_SET_INFO }, sizeof(uint8_t));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &root_impl_len, sizeof(root_impl_len));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, impl_name, root_impl_len);
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &modules_len, sizeof(modules_len));
 
   for (size_t i = 0; i < context->len; i++) {
     send_module_info(context->modules[i].name);
@@ -852,7 +848,7 @@ struct ActionHandler {
 static void handle_zygote_injected(struct Client *client) {
   (void) client;
 
-  unix_datagram_sendto(CONTROLLER_SOCKET, &(uint8_t){ ZYGOTE_INJECTED }, sizeof(uint8_t));
+  unix_datagram_sendto(ZYGISK_CONTROLLER_SOCKET, &(uint8_t){ ZYGOTE_INJECTED }, sizeof(uint8_t));
 }
 
 /* INFO: A restarted zygote drops every companion, the loader asks for them
@@ -948,7 +944,7 @@ static void handle_read_modules(struct Client *client) {
 
   for (size_t i = 0; i < clen; i++) {
     char lib_path[PATH_MAX];
-    snprintf(lib_path, PATH_MAX, PATH_MODULES_DIR "/%s/zygisk/" ARCH_STR ".so", client->context->modules[i].name);
+    snprintf(lib_path, PATH_MAX, ZYGISK_MODULES_DIR "/%s/zygisk/" ARCH_STR ".so", client->context->modules[i].name);
 
     if (write_string(client->fd, lib_path) == -1) {
       LOGE("Failed writing module path.");
@@ -1183,7 +1179,7 @@ static void handle_get_module_dir(struct Client *client) {
   }
 
   char module_dir[PATH_MAX];
-  snprintf(module_dir, PATH_MAX, "%s/%s", PATH_MODULES_DIR, client->context->modules[index].name);
+  snprintf(module_dir, PATH_MAX, "%s/%s", ZYGISK_MODULES_DIR, client->context->modules[index].name);
 
   int fd = open(module_dir, O_RDONLY | O_CLOEXEC);
   if (fd == -1) {

@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include "zygisk_paths.h"
+
 #include <unistd.h>
 
 /* INFO: Must stay in step with enum DaemonSocketAction on the daemon. */
@@ -59,12 +61,6 @@ enum mount_namespace_state {
   Clean,
   Mounted
 };
-
-#define TMP_PATH "/data/adb/rezygisk"
-
-static inline const char *rezygiskd_get_path() {
-  return TMP_PATH;
-}
 
 bool rezygiskd_zygote_injected(void);
 

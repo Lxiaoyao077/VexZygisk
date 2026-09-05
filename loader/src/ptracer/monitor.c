@@ -16,8 +16,6 @@
 
 #include "monitor.h"
 
-#define SOCKET_NAME "init_monitor"
-
 #ifdef __LP64__
   #define MONITOR_ABI "64"
   #define APP_PROCESS_NAME "/system/bin/app_process64"
@@ -184,7 +182,7 @@ bool rezygiskd_listener_init() {
     .sun_path = { 0 }
   };
 
-  int sun_path_len = snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s", rezygiskd_get_path(), SOCKET_NAME);
+  int sun_path_len = snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", ZYGISK_CONTROLLER_SOCKET);
   if (sun_path_len < 0 || (size_t)sun_path_len >= sizeof(addr.sun_path)) {
     LOGE("The monitor socket path does not fit into sockaddr_un");
 
@@ -975,7 +973,7 @@ static void json_escape_into(char *dst, size_t cap, const char *src) {
 static bool update_status(const char *message) {
   build_module_text();
 
-  FILE *prop = fopen("/data/adb/modules/rezygisk/module.prop", "w");
+  FILE *prop = fopen(ZYGISK_MODULE_PROP, "w");
   if (prop == NULL) {
     PLOGE("failed to open prop");
 
@@ -1039,7 +1037,7 @@ static bool update_status(const char *message) {
   fclose(prop);
 
   if (environment_information.root_impl) {
-    FILE *json = fopen("/data/adb/rezygisk/state.json", "w");
+    FILE *json = fopen(ZYGISK_STATE_JSON, "w");
     if (json == NULL) {
       PLOGE("failed to open state.json");
 
@@ -1115,7 +1113,7 @@ static bool update_status(const char *message) {
 
     fclose(json);
   } else {
-    if (remove("/data/adb/rezygisk/state.json") == -1) {
+    if (remove(ZYGISK_STATE_JSON) == -1) {
       PLOGE("failed to remove state.json");
     }
   }
@@ -1126,7 +1124,7 @@ static bool update_status(const char *message) {
 }
 
 static bool prepare_environment() {
-  FILE *orig_prop = fopen("/data/adb/modules/rezygisk/module.prop", "r");
+  FILE *orig_prop = fopen(ZYGISK_MODULE_PROP, "r");
   if (orig_prop == NULL) {
     PLOGE("failed to open orig prop");
 
@@ -1221,7 +1219,7 @@ int send_control_command(enum rezygiskd_command cmd) {
     .sun_path = { 0 }
   };
 
-  int sun_path_len = snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s", rezygiskd_get_path(), SOCKET_NAME);
+  int sun_path_len = snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", ZYGISK_CONTROLLER_SOCKET);
   if (sun_path_len < 0 || (size_t)sun_path_len >= sizeof(addr.sun_path)) {
     close(sockfd);
 

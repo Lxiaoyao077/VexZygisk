@@ -14,8 +14,6 @@
 
 #include "daemon.h"
 
-#define SOCKET_FILE_NAME LP_SELECT("cp32", "cp64") ".sock"
-
 /* INFO: The socket either accepts at once or is refused outright, so a full
          second only stalls the injection of every process while the daemon is
          down. This is still long enough to ride out a daemon restart. */
@@ -32,7 +30,7 @@ static int rezygiskd_connect(uint8_t retry) {
     Sources:
      - https://pubs.opengroup.org/onlinepubs/009696699/basedefs/sys/un.h.html
   */
-  strcpy(addr.sun_path, TMP_PATH "/" SOCKET_FILE_NAME);
+  strcpy(addr.sun_path, ZYGISK_CP_SOCKET);
 
   for (uint8_t attempt = 0; attempt <= retry; attempt++) {
     int fd = socket(PF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);

@@ -9,10 +9,13 @@ OBJ_DIR = $(OBJ_ROOT)/$(ARCH)
 ZKSU_VERSION ?= $(VER_NAME)-$(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE)
 
 ifeq ($(BUILD_TYPE),release)
-	TYPE_CFLAGS = -O3 -flto -Wno-unused -Wno-unused-parameter       \
+	# INFO: The injected library is size-sensitive on top of being hot: -Oz
+	#       plus identical code folding buys back part of what the five
+	#       statically linked engines cost, without giving up the LTO gains.
+	TYPE_CFLAGS = -Oz -flto -Wno-unused -Wno-unused-parameter       \
 				  -fvisibility=hidden -fvisibility-inlines-hidden -fno-unwind-tables \
 				  -fno-asynchronous-unwind-tables -DNDEBUG
-	TYPE_LDFLAGS = -Wl,--exclude-libs,ALL -Wl,--strip-all -flto
+	TYPE_LDFLAGS = -Wl,--exclude-libs,ALL -Wl,--strip-all -flto -Wl,--icf=safe
 else
 	TYPE_CFLAGS = -g -O0
 	TYPE_LDFLAGS =

@@ -34,6 +34,50 @@ jobs:
           make all -j$(nproc)
           make apatch -j$(nproc)
 
+      - name: Binary size budget
+        # INFO: libzygisk.so statically links five engines (csoloader, PLTI,
+        #       Dobby, LSPlt and the LZMA decoder), so a careless dependency
+        #       can balloon it unnoticed. The limits sit roughly 15% above
+        #       the sizes at the time the budget was introduced; raise them
+        #       deliberately when a feature genuinely needs the space.
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+
+          budget_kib = {
+              "build/obj/release/loader/arm64-v8a/stripped/libzygisk.so": 430,
+              "build/obj/release/loader/armeabi-v7a/stripped/libzygisk.so": 330,
+              "build/obj/release/loader/arm64-v8a/stripped/libzygisk_ptrace.so": 100,
+              "build/obj/release/loader/armeabi-v7a/stripped/libzygisk_ptrace.so": 100,
+              "build/obj/release/zygiskd/arm64-v8a/zygiskd": 56,
+              "build/obj/release/zygiskd/armeabi-v7a/zygiskd": 52,
+              "build-apatch/obj/release/loader/arm64-v8a/stripped/libzygisk.so": 430,
+              "build-apatch/obj/release/loader/armeabi-v7a/stripped/libzygisk.so": 330,
+              "build-apatch/obj/release/loader/arm64-v8a/stripped/libzygisk_ptrace.so": 100,
+              "build-apatch/obj/release/loader/armeabi-v7a/stripped/libzygisk_ptrace.so": 100,
+              "build-apatch/obj/release/zygiskd/arm64-v8a/zygiskd": 60,
+              "build-apatch/obj/release/zygiskd/armeabi-v7a/zygiskd": 56,
+          }
+
+          failed = False
+
+          for path, limit in sorted(budget_kib.items()):
+              if not os.path.exists(path):
+                  print(f"MISSING                {path}")
+                  failed = True
+
+                  continue
+
+              actual = os.path.getsize(path) // 1024
+              over = actual > limit
+              failed = failed or over
+
+              print(f"{actual:6} KiB / {limit:6} KiB  {'OVER' if over else 'ok  '}  {path}")
+
+          sys.exit(1 if failed else 0)
+          PY
+
       - name: Host unit tests
         # INFO: The loader cannot run on this host, but its ELF reader can, and
         #       so can the mini-debug decompressor. A broken parse or a wrong

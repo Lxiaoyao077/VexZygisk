@@ -106,9 +106,13 @@ jobs:
       - name: Upload release
         uses: actions/upload-artifact@v7
         with:
-          path: |
-            build/out/VexZygisk-v*-release.zip
-            build-apatch/out/VexZygisk-APatch-v*-release.zip
+          path: "build/out/VexZygisk-v*-release.zip"
+          archive: false
+
+      - name: Upload APatch release
+        uses: actions/upload-artifact@v7
+        with:
+          path: "build-apatch/out/VexZygisk-APatch-v*-release.zip"
           archive: false
 
       - name: Upload debug

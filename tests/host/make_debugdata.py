@@ -69,6 +69,9 @@ def build_inner(names, offsets):
     """
     strtab, _ = build_string_table(names)
 
+    # The ELF header always takes the first sixty four bytes.
+    ehdr_size = 64
+
     # Index 0 is the reserved all-zero entry of every symbol table.
     symtab = bytearray(struct.pack("<IBBHQQ", 0, 0, 0, 0, 0, 0))
     for name, kind, value, size in SYMBOLS:
@@ -77,8 +80,11 @@ def build_inner(names, offsets):
 
     shstrtab, shstr_offsets = build_string_table([".symtab", ".strtab", ".shstrtab"])
 
-    strtab_offset = 0
-    symtab_offset = len(strtab)
+    # Offsets are relative to the start of the file, so the header comes
+    # first. Losing the header offset here shifts every section pointer and
+    # makes the loader read symbols from the middle of the string table.
+    strtab_offset = ehdr_size
+    symtab_offset = strtab_offset + len(strtab)
     shstrtab_offset = symtab_offset + len(symtab)
 
     # The section header table sits right after the section contents.

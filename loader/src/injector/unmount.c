@@ -186,6 +186,8 @@ static const char *find_module_loop_source(const struct mount_list *all) {
       return info->source;
     }
   }
+#else
+  (void) all;
 #endif
 
   return NULL;

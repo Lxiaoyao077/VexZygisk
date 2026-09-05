@@ -54,16 +54,16 @@ static void check_parse_and_select(void) {
 
   struct mount_list all = { 0 };
   CHECK(mount_list_parse(path, &all), "mount_list_parse failed");
-  CHECK(all.len == 6, "expected 6 parsed entries, got %zu", all.len);
-  if (all.len == 6) {
+  CHECK(all.len == 7, "expected 7 parsed entries, got %zu", all.len);
+  if (all.len == 7) {
     /* INFO: The second section of each line must have been split off
              correctly, or the sources would carry the fs options. */
     CHECK(strcmp(all.items[4].target, "/data/adb/modules/zygisk_test/zygisk") == 0,
           "target misparsed: %s", all.items[4].target);
     CHECK(strcmp(all.items[4].source, "/dev/block/loop14") == 0,
           "source misparsed: %s", all.items[4].source);
-    CHECK(strcmp(all.items[5].source, "tmpfs") == 0,
-          "source misparsed: %s", all.items[5].source);
+    CHECK(strcmp(all.items[6].source, "tmpfs") == 0,
+          "source misparsed: %s", all.items[6].source);
   }
 
   const char *loop_source = find_module_loop_source(&all);
@@ -72,6 +72,7 @@ static void check_parse_and_select(void) {
         "loop source not detected, got %s", loop_source ? loop_source : "(null)");
 
   CHECK(carries_root_trace(&all.items[4], loop_source), "module overlay not selected");
+  CHECK(carries_root_trace(&all.items[5], loop_source), "second module overlay not selected");
 #else
   /* INFO: The APatch flavour skips the loop probe, so the module overlays
            are matched purely by their /adb/modules root. */
@@ -80,7 +81,7 @@ static void check_parse_and_select(void) {
 #endif
   CHECK(!carries_root_trace(&all.items[1], loop_source), "/system falsely selected");
   CHECK(carries_root_trace(&all.items[3], loop_source), "modules dir overlay not selected");
-  CHECK(!carries_root_trace(&all.items[5], loop_source), "tmpfs mount falsely selected");
+  CHECK(!carries_root_trace(&all.items[6], loop_source), "tmpfs mount falsely selected");
 
   mount_list_free(&all);
   remove(path);

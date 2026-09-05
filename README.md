@@ -2,7 +2,7 @@
 
 VexZygisk is a standalone implementation of Zygisk for KernelSU and APatch, based on ReZygisk.
 
-The codebase has been rewritten to C entirely, bringing not only a much cleaner codebase that is easier to follow, but also lighter binaries that are also faster. Custom linkers also have been introduced to future-proof VexZygisk against future detections, not using the system linker at all in normal circumstances, defeating any linker-based detection.
+The codebase has been rewritten to C entirely, bringing not only a much cleaner codebase that is easier to follow, but also lighter binaries that are also faster. Custom linkers also have been introduced to future-proof VexZygisk against future detections: standard Zygisk modules are mapped by the built-in csoloader instead of the system linker, defeating linker-based detection on that path, while Zygisk Next modules keep loading through the system linker as their contract expects.
 
 The project builds for **one root solution at a time**: the KernelSU flavour and the APatch flavour are separate archives produced by the same CI run, and each one carries only its own backend — no traces of the other root solution ship inside.
 

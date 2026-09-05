@@ -15,8 +15,6 @@
 
 #include "elf_util.h"
 
-#include "elf_util.h"
-
 #include "LzmaDec.h"
 
 /* INFO: Mini-debug info (.gnu_debugdata) support. The section carries an

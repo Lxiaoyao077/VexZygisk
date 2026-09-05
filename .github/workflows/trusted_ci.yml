@@ -33,6 +33,75 @@ jobs:
         run: |
           make all -j$(nproc)
 
+      - name: Host unit tests
+        # INFO: The loader cannot run on this host, but its ELF reader can, and
+        #       so can the mini-debug decompressor. A broken parse or a wrong
+        #       symbol then fails the build instead of showing up only on a
+        #       device as a module that silently does not load.
+        run: |
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+             -Itests/host -Iloader/src/include -Iloader/src/common \
+             -Iloader/src/external/lzma \
+             -c loader/src/common/elf_util.c -o /tmp/elf_util.o
+          cc -std=c18 -D_GNU_SOURCE -w \
+             -Iloader/src/external/lzma \
+             -c loader/src/external/lzma/LzmaDec.c -o /tmp/lzma_dec.o
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+             -Itests/host -Iloader/src/include -Iloader/src/common \
+             -Iloader/src/external/lzma \
+             tests/host/test_elf_util.c /tmp/elf_util.o /tmp/lzma_dec.o \
+             -o /tmp/test_elf_util
+          python3 tests/host/make_debugdata.py /tmp/debugdata
+          /tmp/test_elf_util /tmp/debugdata /tmp/test_elf_util
+
+      - name: Generate update.json
+        # INFO: Built here rather than committed by hand so it can never drift
+        #       from the zip it points at. The release itself is still created
+        #       manually: nothing here pushes a tag, a release or a commit, so
+        #       the file is published with the release when one is cut.
+        run: |
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          import subprocess
+
+          archive = sorted(glob.glob("build/out/VexZygisk-v*-release.zip"))[-1]
+          name = os.path.basename(archive)
+
+          # VexZygisk-<version>-<versionCode>-<commit>-release.zip
+          version, version_code = name.split("-")[1:3]
+
+          previous = subprocess.run(
+              ["git", "describe", "--tags", "--abbrev=0"],
+              capture_output=True, text=True).stdout.strip()
+
+          revisions = f"{previous}..HEAD" if previous else "-50"
+          commits = subprocess.run(
+              ["git", "log", "--pretty=- %s", revisions],
+              capture_output=True, text=True).stdout.strip()
+
+          update = {
+              "version": version,
+              "versionCode": int(version_code),
+              "zipUrl": "https://github.com/{}/releases/download/{}/{}".format(
+                  os.environ["GITHUB_REPOSITORY"], version, name),
+              "changelog": "VexZygisk {}\n\n{}".format(version, commits),
+          }
+
+          with open("build/out/update.json", "w") as file:
+              json.dump(update, file, indent=2, ensure_ascii=False)
+              file.write("\n")
+
+          print(json.dumps(update, indent=2))
+          PY
+
+      - name: Upload update.json
+        uses: actions/upload-artifact@v7
+        with:
+          name: update.json
+          path: "build/out/update.json"
+
       - name: Upload release
         uses: actions/upload-artifact@v7
         with:

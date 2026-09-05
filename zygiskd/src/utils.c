@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -702,6 +703,14 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
 
   int socket_parent = sockets[0];
   int socket_child = sockets[1];
+
+  /* INFO: The handshake runs inside a request handler; a helper wedged on a
+            strange /proc entry must not block the daemon for good. On a
+            timeout the socket is closed, which makes the child's next write
+            fail and lets it exit for the reap below. */
+  struct timeval timeout = { .tv_sec = 5, .tv_usec = 0 };
+  setsockopt(socket_parent, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  setsockopt(socket_parent, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
   pid_t fork_pid = fork();
   if (fork_pid < 0) {

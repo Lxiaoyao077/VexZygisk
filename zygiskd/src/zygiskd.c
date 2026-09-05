@@ -435,6 +435,11 @@ static bool zn_matches_target(const char *target, bool is_name, const char *proc
   return strcmp(process_path, target) == 0;
 }
 
+/* INFO: Every exchange the daemon takes part in is bound by this, client
+           and companion sockets alike: a stuck peer must never stall the
+           zygote forks waiting behind it. */
+#define DAEMON_EXCHANGE_TIMEOUT_SECS 5
+
 /* Forks a process that runs "zygiskd <mode> <fd>" and hands it the child end
    of a socket pair, so the companion keeps the daemon's SELinux domain.
    Returns 0 with the parent end in *out_fd, or -1 on failure. */
@@ -452,6 +457,13 @@ static int exec_companion(char *restrict argv[], const char *restrict tag, const
 
   int daemon_fd = sockets[0];
   int companion_fd = sockets[1];
+
+  /* INFO: The handshake below runs inside a request handler: a companion
+            wedged in its constructor would otherwise hang the daemon — and
+            with it every later zygote fork — indefinitely. */
+  struct timeval timeout = { .tv_sec = DAEMON_EXCHANGE_TIMEOUT_SECS, .tv_usec = 0 };
+  setsockopt(daemon_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  setsockopt(daemon_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
   pid_t pid = fork();
   if (pid < 0) {
@@ -800,9 +812,8 @@ static void reload_modules(struct Context *restrict context) {
   send_daemon_info(context);
 }
 /* INFO: A client that hangs in the middle of an exchange would stall every
-         later request, and every zygote fork talks to this daemon. Bound each
-         exchange instead of trusting the peer. */
-#define DAEMON_CLIENT_TIMEOUT_SECS 5
+         later request, and every zygote fork talks to this daemon. The same
+         bound applies to the companion sockets created by exec_companion. */
 
 /* INFO: Per-connection state handed to every action handler. One struct keeps
          the handler signature stable and lets dispatch stay a plain table. */
@@ -1282,7 +1293,7 @@ static void serve_loop(int socket_fd, struct Context *restrict context, char *re
 
     /* INFO: Bound a single exchange so a stuck client cannot stall the zygote
              forks waiting behind it. */
-    struct timeval timeout = { .tv_sec = DAEMON_CLIENT_TIMEOUT_SECS, .tv_usec = 0 };
+    struct timeval timeout = { .tv_sec = DAEMON_EXCHANGE_TIMEOUT_SECS, .tv_usec = 0 };
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 

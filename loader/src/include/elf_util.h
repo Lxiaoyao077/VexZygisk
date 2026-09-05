@@ -8,6 +8,12 @@
 
 #define SHT_GNU_HASH 0x6ffffff6
 
+/* INFO: bionic's <elf.h> provides ELF_ST_TYPE, glibc does not. Kept guarded so
+         the host-side tests can compile the same source with either libc. */
+#ifndef ELF_ST_TYPE
+  #define ELF_ST_TYPE(info) ((info) & 0xf)
+#endif
+
 typedef struct {
   char *elf;
   void *base;

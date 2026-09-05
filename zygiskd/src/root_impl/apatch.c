@@ -166,21 +166,29 @@ static size_t ap_read_package_config(struct ap_package_entry *out, size_t max_ro
 
 /* INFO: This file is walked for every process flag query, that is, for every
          fork off zygote. The parsed rows are cached and the cache is
-         invalidated on the file's stat identity (dev, inode, size, mtime), so
-         a grant takes effect as soon as APatch rewrites the config. The
-         daemon serves one request at a time, so the cache needs no lock. */
+         invalidated on the file's stat identity, so a grant takes effect as
+         soon as APatch rewrites the config (which lands on a fresh inode via
+         tmp + rename). The stat of the parsed file is kept as-is and compared
+         field by field in its own types: 32-bit bionic's struct stat carries
+         64-bit fields while dev_t/ino_t/off_t stay 32-bit, so copying into
+         separate members would truncate. The daemon serves one request at a
+         time, so the cache needs no lock. */
 struct ap_config_cache {
-  dev_t dev;
-  ino_t ino;
-  off_t size;
-  time_t mtime;
-
   bool valid;
+  struct stat stat;
+
   struct ap_package_entry entries[AP_MAX_ROWS];
   size_t rows;
 };
 
 static struct ap_config_cache ap_config_cache;
+
+static bool ap_stat_unchanged(const struct stat *a, const struct stat *b) {
+  return a->st_dev == b->st_dev &&
+         a->st_ino == b->st_ino &&
+         a->st_size == b->st_size &&
+         a->st_mtime == b->st_mtime;
+}
 
 static struct ap_package_entry *ap_get_config_rows(size_t *rows) {
   struct stat st;
@@ -197,24 +205,10 @@ static struct ap_package_entry *ap_get_config_rows(size_t *rows) {
     return ap_config_cache.entries;
   }
 
-  /* INFO: The identity key stops at st_mtime on purpose: 32-bit bionic's
-            struct stat does not expose st_mtim, while st_mtime is a real
-            field there and a macro over st_mtim.tv_sec on 64-bit. APatch
-            rewrites the file through tmp + rename, so a rewrite lands on a
-            fresh inode and the size/mtime comparisons are belt and braces. */
-  bool cached = ap_config_cache.valid &&
-                ap_config_cache.dev == st.st_dev &&
-                ap_config_cache.ino == st.st_ino &&
-                ap_config_cache.size == st.st_size &&
-                ap_config_cache.mtime == st.st_mtime;
-
-  if (!cached) {
+  if (!ap_config_cache.valid || !ap_stat_unchanged(&st, &ap_config_cache.stat)) {
     size_t parsed = ap_read_package_config(ap_config_cache.entries, AP_MAX_ROWS);
 
-    ap_config_cache.dev = st.st_dev;
-    ap_config_cache.ino = st.st_ino;
-    ap_config_cache.size = st.st_size;
-    ap_config_cache.mtime = st.st_mtime;
+    ap_config_cache.stat = st;
     ap_config_cache.rows = parsed;
     ap_config_cache.valid = true;
 

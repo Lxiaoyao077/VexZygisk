@@ -32,6 +32,12 @@ allow zygote system_lib_file file execmod
 #       also grants untrusted_app execute on dex2oat_exec, which is a sandbox
 #       hole in its own right and is exactly what makes LSPosed/Vector report
 #       its dex2oat wrapper as unsupported ("SELinux not properly configured").
+#
+#       The subject is left as * on purpose: the loader also runs Zygisk Next
+#       libraries inside the app process itself (per-application targets are
+#       resolved and dlopened there), so the executing domain is the app's own
+#       and cannot be enumerated here. Restricting it to zygote would break
+#       every module loaded outside the zygote.
 allow * ksu file execute
 
 # INFO: How a memfd is labelled depends on the kernel:

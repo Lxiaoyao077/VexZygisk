@@ -2,8 +2,15 @@
 #define ZN_LOADER_H
 
 /* INFO: Scans the modules for a zn_modules.txt and loads the Zygisk Next
-         libraries whose target matches the current process. */
+         libraries whose target matches the current process. Meant for the
+         zygote itself, where the process name can be read off /proc/self/exe. */
 void zn_load_all_modules(void);
+
+/* INFO: Same scan, but for a forked child that is about to specialize:
+         process_name is the nice_name the zygote was given, and only the
+         modules targeting it are loaded. Libraries already inherited from the
+         zygote are skipped. */
+void zn_load_modules_for_process(const char *process_name);
 
 /* INFO: Opens a fresh connection to the companion of the module behind
          `handle`, which is the self handle it received in onModuleLoaded.

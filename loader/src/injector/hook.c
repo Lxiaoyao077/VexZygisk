@@ -26,6 +26,7 @@
 #include "cpp_strings.h"
 #include "registers.h"
 #include "unmount.h"
+#include "zn_loader.h"
 
 void *start_addr = NULL;
 size_t block_size = 0;
@@ -969,6 +970,13 @@ static bool load_modules_only(void) {
     return false;
   }
 
+  /* INFO: The daemon compacts its list on every RemoveModule, so each removal
+            shifts the modules that follow one slot to the left. The index
+            reported to it is therefore offset by the removals already made;
+            sending the raw list index would delete the wrong module whenever
+            more than one library fails to load. */
+  size_t daemon_removed = 0;
+
   for (size_t i = 0; i < ms.modules_count; i++) {
     const char *lib_path = ms.modules[i];
 
@@ -978,7 +986,8 @@ static bool load_modules_only(void) {
       /* INFO: In case a module failed to load, update the list of available modules
            in VexZygiskd to avoid a mismatch between the loaded modules in VexZygisk
            Zygote library and the available modules in VexZygiskd. */
-      rezygiskd_remove_module(i);
+      rezygiskd_remove_module(i - daemon_removed);
+      daemon_removed++;
 
       continue;
     }
@@ -989,7 +998,8 @@ static bool load_modules_only(void) {
 
       csoloader_unload(&zygisk_modules[zygisk_module_length].lib);
 
-      rezygiskd_remove_module(i);
+      rezygiskd_remove_module(i - daemon_removed);
+      daemon_removed++;
 
       continue;
     }
@@ -1176,6 +1186,8 @@ static void rz_nativeSpecializeAppProcess_pre(struct zygisk_context *ctx) {
 
   FLAG_SET(ctx, SKIP_FD_SANITIZATION);
   rz_app_specialize_pre(ctx);
+
+  zn_load_modules_for_process(ctx->process);
 }
 
 static void rz_nativeSpecializeAppProcess_post(struct zygisk_context *ctx) {
@@ -1193,6 +1205,10 @@ static void rz_nativeForkSystemServer_pre(struct zygisk_context *ctx) {
   rz_run_modules_pre(ctx);
 
   rz_sanitize_fds(ctx);
+
+  /* INFO: Served after the fd sanitizer so the memfd and companion sockets
+             the load opens are not treated as leaked fds and closed. */
+  zn_load_modules_for_process("system_server");
 }
 
 static void rz_nativeForkSystemServer_post(struct zygisk_context *ctx) {
@@ -1225,6 +1241,14 @@ static void rz_nativeForkAndSpecialize_pre(struct zygisk_context *ctx) {
 
   rz_app_specialize_pre(ctx);
   rz_sanitize_fds(ctx);
+
+  /* INFO: Zygisk Next modules are resolved per process: the zygote only ever
+             loaded the ones targeting it, so every app-targeted entry would
+             stay dead. Runs after the fd sanitizer for the same reason as in
+             the system server path, and after the mount namespace switch so
+             the daemon's handover is not lost to setns. Libraries inherited
+             from the zygote are skipped inside the loader. */
+  zn_load_modules_for_process(ctx->process);
 }
 
 static void rz_nativeForkAndSpecialize_post(struct zygisk_context *ctx) {

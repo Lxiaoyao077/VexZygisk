@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <linux/limits.h>
 #include <linux/memfd.h>
+#include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
@@ -81,32 +82,68 @@ static void *dlopen_via_fd(const char *path, int flags) {
     return NULL;
   }
 
-  char buffer[65536];
-  ssize_t got;
+  /* INFO: Zero-copy where the kernel allows it: the source is a regular file
+            and the memfd a tmpfs one, which sendfile handles in-kernel. The
+            read/write loop stays as the fallback for filesystems that refuse
+            it. */
   bool copied = true;
+  off_t offset = 0;
 
-  while ((got = TEMP_FAILURE_RETRY(read(fd, buffer, sizeof(buffer)))) > 0) {
-    size_t left = (size_t)got;
-    const char *cursor = buffer;
+  for (;;) {
+    ssize_t sent = sendfile(mem_fd, fd, &offset, 1 << 20);
 
-    while (left > 0) {
-      ssize_t written = TEMP_FAILURE_RETRY(write(mem_fd, cursor, left));
-      if (written <= 0) {
+    if (sent == 0) break;
+
+    if (sent < 0) {
+      if (errno == EINTR) continue;
+
+      /* INFO: sendfile may have moved part of the file before failing, so
+              the memfd is emptied and both ends rewound before the byte loop
+              restarts the copy from scratch. */
+      if (ftruncate(mem_fd, 0) == -1 || lseek(mem_fd, 0, SEEK_SET) == -1 || lseek(fd, 0, SEEK_SET) == -1) {
         copied = false;
 
         break;
       }
 
-      cursor += written;
-      left -= (size_t)written;
-    }
+      char buffer[65536];
 
-    if (!copied) break;
+      for (;;) {
+        ssize_t got = TEMP_FAILURE_RETRY(read(fd, buffer, sizeof(buffer)));
+
+        if (got < 0) {
+          copied = false;
+
+          break;
+        }
+
+        if (got == 0) break;
+
+        const char *cursor = buffer;
+        size_t left = (size_t)got;
+
+        while (left > 0) {
+          ssize_t written = TEMP_FAILURE_RETRY(write(mem_fd, cursor, left));
+          if (written <= 0) {
+            copied = false;
+
+            break;
+          }
+
+          cursor += written;
+          left -= (size_t)written;
+        }
+
+        if (!copied) break;
+      }
+
+      break;
+    }
   }
 
   close(fd);
 
-  if (!copied || got < 0) {
+  if (!copied) {
     LOGE("dlopen %s: copy to memfd failed: %s", path, strerror(errno));
 
     close(mem_fd);
@@ -263,7 +300,12 @@ static void companion_main(const char *lib_path, int socket_fd) {
     message.msg_control = buffer.control;
     message.msg_controllen = sizeof(buffer.control);
 
-    if (recvmsg(socket_fd, &message, 0) <= 0) break;
+    ssize_t received;
+    do {
+      received = recvmsg(socket_fd, &message, 0);
+    } while (received == -1 && errno == EINTR);
+
+    if (received <= 0) break;
 
     /* INFO: The descriptor is taken out of the message before the command is
              looked at: an unserved request still owns the fd it carried, and
@@ -459,6 +501,17 @@ int zn_companion_connect(void *handle) {
   return sockets[0];
 }
 
+/* INFO: A library that was already loaded — usually one inherited from the
+         zygote when this process was forked — must not be dlopened a second
+         time: its hooks would be installed twice. */
+static bool zn_already_loaded(const char *lib_path) {
+  for (size_t i = 0; i < loaded_libs_count; i++) {
+    if (loaded_entries[i].lib_path != NULL && strcmp(loaded_entries[i].lib_path, lib_path) == 0) return true;
+  }
+
+  return false;
+}
+
 static void load_module_file(const char *module_dir, const char *file, const char *process_path, const char *process_name) {
   FILE *fp = fopen(file, "re");
   if (fp == NULL) return;
@@ -484,7 +537,7 @@ static void load_module_file(const char *module_dir, const char *file, const cha
 
     LOGD("Zygisk Next module [%s] targeting %s: %s", entry.lib_path, entry.target, matched ? "loaded" : "skipped");
 
-    if (!matched) {
+    if (!matched || zn_already_loaded(entry.lib_path)) {
       free(entry.target);
       free(entry.lib_path);
 
@@ -546,6 +599,12 @@ static bool load_modules_from_daemon(const char *process_name, const char *proce
       break;
     }
 
+    if (zn_already_loaded(files[i].lib_path)) {
+      LOGD("Zygisk Next module \"%s\" is already loaded, skipping", files[i].lib_path);
+
+      continue;
+    }
+
     struct zn_entry *entry = &loaded_entries[loaded_libs_count];
     entry->is_name = false;
     entry->companion = files[i].companion;
@@ -597,29 +656,22 @@ static bool load_modules_from_daemon(const char *process_name, const char *proce
   return true;
 }
 
-void zn_load_all_modules(void) {
-  char *process_path = read_process_path();
-  const char *process_name = get_process_name(process_path);
+/* INFO: Loads every Zygisk Next library whose target matches process_name.
+         process_path always comes from /proc/self/exe: a path= target selects
+         the zygote binary, which is the executable of every process this
+         loader runs in, exactly as Zygisk Next treats it.
 
-  if (process_path == NULL) {
-    LOGE("Failed resolving the current process path");
-
-    return;
-  }
-
-  if (load_modules_from_daemon(process_name, process_path)) {
-    free(process_path);
-
-    return;
-  }
+         This runs once in the zygote itself, and once more in every forked
+         child with that child's own process name — without the second call,
+         per-application targets (name=com.foo) would never match anywhere. */
+static void zn_load_modules_for(const char *process_name, const char *process_path) {
+  if (load_modules_from_daemon(process_name, process_path)) return;
 
   LOGW("VexZygiskd is unavailable, reading the Zygisk Next modules directly");
 
   DIR *dir = opendir(ZN_MODULES_DIR);
   if (dir == NULL) {
     LOGE("Failed opening %s", ZN_MODULES_DIR);
-
-    free(process_path);
 
     return;
   }
@@ -644,5 +696,34 @@ void zn_load_all_modules(void) {
   }
 
   closedir(dir);
+}
+
+void zn_load_all_modules(void) {
+  char *process_path = read_process_path();
+  if (process_path == NULL) {
+    LOGE("Failed resolving the current process path");
+
+    return;
+  }
+
+  const char *process_name = get_process_name(process_path);
+
+  zn_load_modules_for(process_name, process_path);
+
+  free(process_path);
+}
+
+void zn_load_modules_for_process(const char *process_name) {
+  if (process_name == NULL) return;
+
+  char *process_path = read_process_path();
+  if (process_path == NULL) {
+    LOGE("Failed resolving the current process path");
+
+    return;
+  }
+
+  zn_load_modules_for(process_name, process_path);
+
   free(process_path);
 }

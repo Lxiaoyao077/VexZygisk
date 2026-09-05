@@ -173,7 +173,7 @@ struct ap_config_cache {
   dev_t dev;
   ino_t ino;
   off_t size;
-  struct timespec mtime;
+  time_t mtime;
 
   bool valid;
   struct ap_package_entry entries[AP_MAX_ROWS];
@@ -197,12 +197,16 @@ static struct ap_package_entry *ap_get_config_rows(size_t *rows) {
     return ap_config_cache.entries;
   }
 
+  /* INFO: The identity key stops at st_mtime on purpose: 32-bit bionic's
+            struct stat does not expose st_mtim, while st_mtime is a real
+            field there and a macro over st_mtim.tv_sec on 64-bit. APatch
+            rewrites the file through tmp + rename, so a rewrite lands on a
+            fresh inode and the size/mtime comparisons are belt and braces. */
   bool cached = ap_config_cache.valid &&
                 ap_config_cache.dev == st.st_dev &&
                 ap_config_cache.ino == st.st_ino &&
                 ap_config_cache.size == st.st_size &&
-                ap_config_cache.mtime.tv_sec == st.st_mtim.tv_sec &&
-                ap_config_cache.mtime.tv_nsec == st.st_mtim.tv_nsec;
+                ap_config_cache.mtime == st.st_mtime;
 
   if (!cached) {
     size_t parsed = ap_read_package_config(ap_config_cache.entries, AP_MAX_ROWS);
@@ -210,11 +214,11 @@ static struct ap_package_entry *ap_get_config_rows(size_t *rows) {
     ap_config_cache.dev = st.st_dev;
     ap_config_cache.ino = st.st_ino;
     ap_config_cache.size = st.st_size;
-    ap_config_cache.mtime = st.st_mtim;
+    ap_config_cache.mtime = st.st_mtime;
     ap_config_cache.rows = parsed;
     ap_config_cache.valid = true;
 
-    LOGD("Parsed %zu APatch package rows", parsed);
+    LOGI("Parsed %zu APatch package rows", parsed);
   }
 
   *rows = ap_config_cache.rows;

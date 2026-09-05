@@ -580,11 +580,10 @@ bool parse_mountinfo(const char *restrict pid, struct mountinfos *restrict mount
     struct mountinfo *mount = &mounts->mounts[i];
 
     if (!mountinfo_parse_line(line, mount)) {
-      LOGV("Skipping malformed mountinfo line: %s", line);
-
-      /* INFO: The slot is left to be reused by the next line; the length only
-                counts fully parsed entries, so consumers never see NULL
-                fields. */
+      /* INFO: Lines without a source (pseudo-filesystems) are routine here,
+                so a skipped line is not worth a log entry. The slot is left
+                to be reused by the next line; the length only counts fully
+                parsed entries, so consumers never see NULL fields. */
       continue;
     }
 

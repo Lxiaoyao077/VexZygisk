@@ -16,13 +16,14 @@ ZIP_NAME = $(MODULE_NAME)-$(VER_NAME)-$(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE).z
 ZIP_FILE = $(ZIP_DIR)/$(ZIP_NAME)
 
 # INFO: Only the install-time policy and the archive differ per flavour; the
-#       binaries themselves already carry the ROOT_IMPL macro. KernelSU-only
-#       pieces (the kernel_umount feature flag, the cloud update entry, the
-#       post-mount.d cleanup) are dropped from the APatch archive.
+#       binaries themselves already carry the ROOT_IMPL macro. The
+#       KernelSU-only managedFeatures flag is dropped from the APatch archive,
+#       and its update entry is pointed at the APatch file so an APatch user is
+#       never handed the KernelSU zip.
 ifeq ($(ROOT_IMPL),apatch)
 	SEPOLICY_SRC = module/src/apatch/sepolicy.rule
 	CUSTOMIZE_SRC = module/src/apatch/customize.sh
-	MODULE_PROP_FILTER = -e '/^managedFeatures=/d' -e '/^updateJson=/d'
+	MODULE_PROP_FILTER = -e '/^managedFeatures=/d' -e 's#/update\.json#/update-apatch.json#'
 	UNINSTALL_FILTER = -e '/post-mount\.d/d'
 else
 	SEPOLICY_SRC = module/src/sepolicy.rule
@@ -69,6 +70,9 @@ all: debug release
 #       under its own archive name, so a single workflow run yields both.
 apatch:
 	$(MAKE) release ROOT_IMPL=apatch MODULE_NAME=VexZygisk-APatch FLAVOR_DIR=-apatch
+
+apatch-debug:
+	$(MAKE) debug ROOT_IMPL=apatch MODULE_NAME=VexZygisk-APatch FLAVOR_DIR=-apatch
 
 build: $(ZIP_FILE)
 

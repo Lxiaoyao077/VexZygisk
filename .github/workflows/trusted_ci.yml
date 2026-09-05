@@ -33,6 +33,7 @@ jobs:
         run: |
           make all -j$(nproc)
           make apatch -j$(nproc)
+          make apatch-debug -j$(nproc)
 
       - name: Binary size budget
         # INFO: libzygisk.so statically links five engines (csoloader, PLTI,
@@ -101,9 +102,11 @@ jobs:
 
       - name: Generate update.json
         # INFO: Built here rather than committed by hand so it can never drift
-        #       from the zip it points at. The release itself is still created
-        #       manually: nothing here pushes a tag, a release or a commit, so
-        #       the file is published with the release when one is cut.
+        #       from the zip it points at. Each flavour gets its own file, so
+        #       an APatch user is never handed the KernelSU archive. The
+        #       release itself is still created manually: nothing here pushes a
+        #       tag, a release or a commit, so the files are published with the
+        #       release when one is cut.
         run: |
           python3 - <<'PY'
           import glob
@@ -112,9 +115,11 @@ jobs:
           import re
           import subprocess
 
-          archives = glob.glob("build/out/VexZygisk-v*-release.zip")
-          if not archives:
-              raise SystemExit("no release archive found")
+          # (build tree, output file, archive pattern)
+          flavours = [
+              ("build", "update.json", "VexZygisk-v*-release.zip"),
+              ("build-apatch", "update-apatch.json", "VexZygisk-APatch-v*-release.zip"),
+          ]
 
           # INFO: Lexicographic order would pick v2.1.9 over v2.1.10, so the
           #       newest archive is the one with the highest versionCode.
@@ -124,50 +129,58 @@ jobs:
                   raise SystemExit(f"cannot parse versionCode from {path}")
               return int(match.group(1))
 
-          archive = max(archives, key=archive_version_code)
-          name = os.path.basename(archive)
-
-          # VexZygisk-<version>-<versionCode>-<commit>-release.zip
-          version, version_code = name.split("-")[1:3]
-
           previous = subprocess.run(
               ["git", "describe", "--tags", "--abbrev=0"],
               capture_output=True, text=True).stdout.strip()
-
-          # INFO: The zipUrl points at a release named exactly after the
-          #       version; warn while it is still cheap to notice.
-          head = subprocess.run(
-              ["git", "rev-parse", "HEAD"],
-              capture_output=True, text=True).stdout.strip()
-
-          tag = subprocess.run(
-              ["git", "rev-parse", "-q", "--verify", f"refs/tags/{version}"],
-              capture_output=True, text=True).stdout.strip()
-
-          if not tag:
-              print(f"WARNING: tag {version} does not exist yet; "
-                    f"update.json's zipUrl will 404 until it is cut")
-          elif tag != head:
-              print(f"WARNING: tag {version} does not point at HEAD ({tag})")
 
           revisions = f"{previous}..HEAD" if previous else "-50"
           commits = subprocess.run(
               ["git", "log", "--pretty=- %s", revisions],
               capture_output=True, text=True).stdout.strip()
 
-          update = {
-              "version": version,
-              "versionCode": int(version_code),
-              "zipUrl": "https://github.com/{}/releases/download/{}/{}".format(
-                  os.environ["GITHUB_REPOSITORY"], version, name),
-              "changelog": "VexZygisk {}\n\n{}".format(version, commits),
-          }
+          head = subprocess.run(
+              ["git", "rev-parse", "HEAD"],
+              capture_output=True, text=True).stdout.strip()
 
-          with open("build/out/update.json", "w") as file:
-              json.dump(update, file, indent=2, ensure_ascii=False)
-              file.write("\n")
+          for tree, out_name, pattern in flavours:
+              archives = glob.glob(f"{tree}/out/{pattern}")
+              if not archives:
+                  raise SystemExit(f"no release archive found for {pattern}")
 
-          print(json.dumps(update, indent=2))
+              archive = max(archives, key=archive_version_code)
+              name = os.path.basename(archive)
+
+              # <prefix>-<version>-<versionCode>-<commit>-release.zip
+              fields = name[: -len("-release.zip")].split("-")
+              version, version_code = fields[-3], fields[-2]
+
+              # INFO: The zipUrl points at a release named exactly after the
+              #       version; warn while it is still cheap to notice.
+              tag = subprocess.run(
+                  ["git", "rev-parse", "-q", "--verify", f"refs/tags/{version}"],
+                  capture_output=True, text=True).stdout.strip()
+
+              if not tag:
+                  print(f"WARNING: tag {version} does not exist yet; "
+                        f"{out_name}'s zipUrl will 404 until it is cut")
+              elif tag != head:
+                  print(f"WARNING: tag {version} does not point at HEAD ({tag})")
+
+              update = {
+                  "version": version,
+                  "versionCode": int(version_code),
+                  "zipUrl": "https://github.com/{}/releases/download/{}/{}".format(
+                      os.environ["GITHUB_REPOSITORY"], version, name),
+                  "changelog": "VexZygisk {}\n\n{}".format(version, commits),
+              }
+
+              path = f"{tree}/out/{out_name}"
+              with open(path, "w") as file:
+                  json.dump(update, file, indent=2, ensure_ascii=False)
+                  file.write("\n")
+
+              print(path)
+              print(json.dumps(update, indent=2))
           PY
 
       - name: Upload update.json
@@ -175,6 +188,14 @@ jobs:
         with:
           name: update.json
           path: "build/out/update.json"
+          archive: false
+
+      - name: Upload APatch update.json
+        uses: actions/upload-artifact@v7
+        with:
+          name: update-apatch.json
+          path: "build-apatch/out/update-apatch.json"
+          archive: false
 
       - name: Upload release
         uses: actions/upload-artifact@v7
@@ -192,4 +213,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           path: "build/out/VexZygisk-v*-debug.zip"
+          archive: false
+
+      - name: Upload APatch debug
+        uses: actions/upload-artifact@v7
+        with:
+          path: "build-apatch/out/VexZygisk-APatch-v*-debug.zip"
           archive: false

@@ -278,11 +278,14 @@ static bool ap_dir_belongs_to_manager(const char *base, uid_t uid) {
     if (entry->d_type != DT_DIR) continue;
     if (entry->d_name[0] == '.') continue;
 
+    /* INFO: Every path here is far below PATH_MAX, but gcc cannot see that
+             through the two-level snprintf and would flag it; an entry that
+             actually overflows is not one worth probing anyway. */
     char user_dir[PATH_MAX];
-    snprintf(user_dir, PATH_MAX, "%s/%s", base, entry->d_name);
+    if (snprintf(user_dir, sizeof(user_dir), "%s/%s", base, entry->d_name) >= PATH_MAX) continue;
 
     char manager_dir[PATH_MAX];
-    snprintf(manager_dir, PATH_MAX, "%s/%s", user_dir, AP_MANAGER_PKG);
+    if (snprintf(manager_dir, sizeof(manager_dir), "%s/%s", user_dir, AP_MANAGER_PKG) >= PATH_MAX) continue;
 
     struct stat st;
     if (stat(manager_dir, &st) == 0 && st.st_uid == uid) {
@@ -291,7 +294,7 @@ static bool ap_dir_belongs_to_manager(const char *base, uid_t uid) {
       break;
     }
 
-    snprintf(manager_dir, PATH_MAX, "%s/%s", user_dir, AP_FOLKPATCH_PKG);
+    if (snprintf(manager_dir, sizeof(manager_dir), "%s/%s", user_dir, AP_FOLKPATCH_PKG) >= PATH_MAX) continue;
 
     if (stat(manager_dir, &st) == 0 && st.st_uid == uid) {
       found = true;

@@ -114,7 +114,5 @@ jobs:
       - name: Upload debug
         uses: actions/upload-artifact@v7
         with:
-          path: |
-            build/out/VexZygisk-v*-debug.zip
-            build-apatch/out/VexZygisk-APatch-v*-debug.zip
+          path: "build/out/VexZygisk-v*-debug.zip"
           archive: false

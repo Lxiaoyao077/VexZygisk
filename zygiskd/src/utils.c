@@ -471,18 +471,23 @@ bool check_unix_socket(int fd, bool block) {
 }
 
 void stringify_root_impl_name(struct root_impl impl, char *restrict output) {
+#ifdef ROOT_IMPL_APATCH
   switch (impl.impl) {
-    case KernelSU: {
-      strcpy(output, "KernelSU");
-
-      break;
-    }
     case APatch: {
       strcpy(output, "APatch");
 
       break;
     }
   }
+#else
+  switch (impl.impl) {
+    case KernelSU: {
+      strcpy(output, "KernelSU");
+
+      break;
+    }
+  }
+#endif
 }
 
 /* INFO: Only the fields consumed by umount_root are kept: the mount point

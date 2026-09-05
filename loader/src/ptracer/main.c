@@ -85,18 +85,23 @@ int main(int argc, char **argv) {
 
     printf("Daemon process PID: %d\n", info.pid);
 
+#ifdef ROOT_IMPL_APATCH
     switch (info.root_impl) {
-      case ROOT_IMPL_KERNELSU: {
-        printf("Root implementation: KernelSU\n");
-
-        break;
-      }
       case ROOT_IMPL_APD: {
         printf("Root implementation: APatch\n");
 
         break;
       }
     }
+#else
+    switch (info.root_impl) {
+      case ROOT_IMPL_KERNELSU: {
+        printf("Root implementation: KernelSU\n");
+
+        break;
+      }
+    }
+#endif
 
     if (info.modules.modules_count != 0) {
       printf("Modules: %zu\n", info.modules.modules_count);

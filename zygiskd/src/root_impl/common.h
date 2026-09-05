@@ -7,13 +7,18 @@
 
 #include "../constants.h"
 
-/* INFO: Which backend the daemon was built for. Only one is compiled in, but
-         both stay in the enum so the impl-name switch and the string table
-         are shared. */
+/* INFO: The backend the daemon was built for. Only the matching member is
+         compiled in, so the switches and the name table cannot carry the
+         other root solution at all. */
+#ifdef ROOT_IMPL_APATCH
 enum root_impls {
-  KernelSU,
   APatch
 };
+#else
+enum root_impls {
+  KernelSU
+};
+#endif
 
 struct root_impl_state {
   enum RootImplState state;

@@ -16,13 +16,19 @@ ZIP_NAME = $(MODULE_NAME)-$(VER_NAME)-$(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE).z
 ZIP_FILE = $(ZIP_DIR)/$(ZIP_NAME)
 
 # INFO: Only the install-time policy and the archive differ per flavour; the
-#       binaries themselves already carry the ROOT_IMPL macro.
+#       binaries themselves already carry the ROOT_IMPL macro. KernelSU-only
+#       pieces (the kernel_umount feature flag, the cloud update entry, the
+#       post-mount.d cleanup) are dropped from the APatch archive.
 ifeq ($(ROOT_IMPL),apatch)
 	SEPOLICY_SRC = module/src/apatch/sepolicy.rule
 	CUSTOMIZE_SRC = module/src/apatch/customize.sh
+	MODULE_PROP_FILTER = -e '/^managedFeatures=/d' -e '/^updateJson=/d'
+	UNINSTALL_FILTER = -e '/post-mount\.d/d'
 else
 	SEPOLICY_SRC = module/src/sepolicy.rule
 	CUSTOMIZE_SRC = module/src/customize.sh
+	MODULE_PROP_FILTER =
+	UNINSTALL_FILTER =
 endif
 
 ifeq ($(TERMUX_VERSION),)
@@ -90,16 +96,19 @@ $(MODULE_DONE): $(LOADER_DONE) $(ZYGISKD_DONE) $(MODULE_INPUTS)
 	    -e 's/$${moduleName}/$(MODULE_NAME)/g'                                          \
 	    -e 's/$${versionName}/$(VER_NAME) ($(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE))/g' \
 	    -e 's/$${versionCode}/$(VER_CODE)/g'                                            \
-	    module/src/module.prop > $(MODULE_OUT)/module.prop
+	    $(MODULE_PROP_FILTER) module/src/module.prop > $(MODULE_OUT)/module.prop
 
 	@echo "Customizing scripts..."
-	@for script in post-fs-data.sh uninstall.sh; do \
-		sed \
-		    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'                   \
-		    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g'                 \
-		    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g'             \
-		    module/src/$$script > $(MODULE_OUT)/$$script;                   \
-	done
+	@sed \
+	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'                   \
+	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g'                 \
+	    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g'             \
+	    module/src/post-fs-data.sh > $(MODULE_OUT)/post-fs-data.sh
+	@sed \
+	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'                   \
+	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g'                 \
+	    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g'             \
+	    $(UNINSTALL_FILTER) module/src/uninstall.sh > $(MODULE_OUT)/uninstall.sh
 	@sed \
 	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'   \
 	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g' \

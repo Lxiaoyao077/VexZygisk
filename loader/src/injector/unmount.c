@@ -136,10 +136,10 @@ static bool mount_info_parse(char *line, struct mount_info *out) {
   return true;
 }
 
-static bool mount_list_parse(struct mount_list *out) {
-  FILE *file = fopen("/proc/self/mountinfo", "re");
+static bool mount_list_parse(const char *path, struct mount_list *out) {
+  FILE *file = fopen(path, "re");
   if (file == NULL) {
-    PLOGE("Failed opening /proc/self/mountinfo");
+    PLOGE("Failed opening %s", path);
 
     return false;
   }
@@ -171,9 +171,6 @@ static bool mount_list_parse(struct mount_list *out) {
   return ok;
 }
 
-/* INFO: KernelSU keeps its modules on a loop device, and that device name
-         shows up as the source of every module mount. It is not known ahead
-         of time, so it is taken from the modules directory mount itself. */
 /* INFO: KernelSU keeps its modules on a loop device, and that device name
          shows up as the source of every module mount. APatch mounts them as a
          plain overlay, so only the KernelSU flavour looks for it. */
@@ -246,7 +243,7 @@ bool zygote_mounts_revert(void) {
   if (g_zygote_reverted) return true;
 
   struct mount_list all = { 0 };
-  if (!mount_list_parse(&all)) {
+  if (!mount_list_parse("/proc/self/mountinfo", &all)) {
     mount_list_free(&all);
 
     return false;

@@ -100,6 +100,21 @@ jobs:
           python3 tests/host/make_debugdata.py /tmp/debugdata
           /tmp/test_elf_util /tmp/debugdata /tmp/test_elf_util
 
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+             -Itests/host -Iloader/src/include \
+             tests/host/test_unmount.c -o /tmp/test_unmount
+          /tmp/test_unmount
+
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror -DROOT_IMPL_APATCH \
+             -Itests/host -Iloader/src/include \
+             tests/host/test_unmount.c -o /tmp/test_unmount_apatch
+          /tmp/test_unmount_apatch
+
+          cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+             -Itests/host -Izygiskd/src -Izygiskd/src/root_impl \
+             tests/host/test_apatch.c -o /tmp/test_apatch
+          /tmp/test_apatch
+
       - name: Generate update.json
         # INFO: Built here rather than committed by hand so it can never drift
         #       from the zip it points at. Each flavour gets its own file, so

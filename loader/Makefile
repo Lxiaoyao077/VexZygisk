@@ -32,7 +32,8 @@ COMMON_SRCS = src/common/daemon.c src/common/elf_util.c   \
 			  src/common/misc.c src/common/socket_utils.c
 INJECTOR_SRCS = src/injector/cpp_strings.c src/injector/entry.c \
 				src/injector/hook.c src/injector/ptrace_clear.c \
-				src/injector/zn_api.c src/injector/zn_loader.c
+				src/injector/zn_api.c src/injector/zn_loader.c \
+				src/injector/unmount.c
 PTRACER_SRCS = src/ptracer/main.c src/ptracer/monitor.c src/ptracer/ptracer.c \
 			   src/ptracer/remote_csoloader.c src/ptracer/utils.c
 

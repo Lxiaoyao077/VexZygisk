@@ -25,6 +25,7 @@
 #include "art_method.h"
 #include "cpp_strings.h"
 #include "registers.h"
+#include "unmount.h"
 
 void *start_addr = NULL;
 size_t block_size = 0;
@@ -1101,7 +1102,11 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
              are going to execute it later, as the app will be in the
              denylist.
   */
-  if ((ctx->info_flags & PROCESS_IS_FIRST_STARTED) == PROCESS_IS_FIRST_STARTED &&
+  /* INFO: Caching the clean namespace costs the daemon a helper process that
+             has to stay alive to hold it, which is exactly what a reverted
+             zygote makes unnecessary, so the probe is skipped then. */
+  if (!zygote_mounts_reverted() &&
+      (ctx->info_flags & PROCESS_IS_FIRST_STARTED) == PROCESS_IS_FIRST_STARTED &&
       (ctx->info_flags & PROCESS_ON_DENYLIST) == 0 &&
       (ctx->info_flags & PROCESS_IS_MANAGER) == 0
   ) {
@@ -1133,7 +1138,11 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
   bool in_denylist = (ctx->info_flags & PROCESS_ON_DENYLIST) == PROCESS_ON_DENYLIST;
   if (in_denylist) {
     FLAG_SET(ctx, DO_REVERT_UNMOUNT);
-    update_mnt_ns(Clean, false);
+
+    /* INFO: A reverted zygote already forks children that cannot see the
+              mounts, so moving them into the clean namespace is only the
+              fallback for when reverting was refused. */
+    if (!zygote_mounts_reverted()) update_mnt_ns(Clean, false);
   }
 
   /* INFO: Executed after setns to ensure a module can update the mounts of an
@@ -1149,7 +1158,7 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
               modules are loaded and executed, so that the modules can have
               the chance to request it.
   */
-  if (!in_denylist && FLAG_GET(ctx, DO_REVERT_UNMOUNT))
+  if (!in_denylist && FLAG_GET(ctx, DO_REVERT_UNMOUNT) && !zygote_mounts_reverted())
     update_mnt_ns(Clean, false);
 }
 
@@ -1200,6 +1209,16 @@ static void rz_nativeForkAndSpecialize_pre(struct zygisk_context *ctx) {
   ctx->process = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->nice_name, NULL);
   LOGV("pre forkAndSpecialize [%s]", ctx->process);
   FLAG_SET(ctx, APP_FORK_AND_SPECIALIZE);
+
+  /* INFO: This has to run before rz_fork_pre rather than inside
+             rz_app_specialize_pre: that one executes in the forked child,
+             where unmounting would clean up that single process and leave
+             zygote, and therefore every later fork, exactly as it was.
+
+           Run from here it is a one-off: zygote gives up the root and module
+           mounts once, and every process forked afterwards inherits a view
+           that never had them. */
+  zygote_mounts_revert();
 
   rz_fork_pre(ctx);
   if (!is_zygote_child(ctx)) return;

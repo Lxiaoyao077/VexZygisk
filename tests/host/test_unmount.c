@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "../../loader/src/injector/unmount.c"
 
@@ -44,10 +45,22 @@ static const char kKsuMountinfo[] =
 static void check_parse_and_select(void) {
   printf("-- mountinfo parse and selection\n");
 
-  const char *path = "/tmp/vz_mountinfo_fixture";
-  FILE *file = fopen(path, "w");
-  CHECK(file != NULL, "cannot create fixture");
-  if (file == NULL) return;
+  /* INFO: mkstemp keeps the fixture out of any fixed location: the test has
+           to run on the CI host and just as well on a Windows checkout,
+           where a hard-coded /tmp path only exists by Git Bash accident. */
+  char path[] = "vz_mountinfo_fixtureXXXXXX";
+  int fixture_fd = mkstemp(path);
+  CHECK(fixture_fd != -1, "cannot create fixture");
+  if (fixture_fd == -1) return;
+
+  FILE *file = fdopen(fixture_fd, "w");
+  CHECK(file != NULL, "cannot open fixture stream");
+  if (file == NULL) {
+    close(fixture_fd);
+    remove(path);
+
+    return;
+  }
 
   fputs(kKsuMountinfo, file);
   fclose(file);

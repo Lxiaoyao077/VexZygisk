@@ -15,21 +15,21 @@ ZKSU_VERSION = $(VER_NAME)-$(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE)
 ZIP_NAME = $(MODULE_NAME)-$(VER_NAME)-$(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE).zip
 ZIP_FILE = $(ZIP_DIR)/$(ZIP_NAME)
 
-# INFO: Only the install-time policy and the archive differ per flavour; the
-#       binaries themselves already carry the ROOT_IMPL macro. The
-#       KernelSU-only managedFeatures flag is dropped from the APatch archive,
-#       and its update entry is pointed at the APatch file so an APatch user is
-#       never handed the KernelSU zip.
+# INFO: Only the per-flavour templates and the archive differ; the binaries
+#       themselves already carry the ROOT_IMPL macro. The APatch copies of the
+#       module files drop the KernelSU-only managedFeatures flag, rewrite the
+#       update entry to the APatch channel, and leave out the post-mount.d
+#       cleanup.
 ifeq ($(ROOT_IMPL),apatch)
 	SEPOLICY_SRC = module/src/apatch/sepolicy.rule
 	CUSTOMIZE_SRC = module/src/apatch/customize.sh
-	MODULE_PROP_FILTER = -e '/^managedFeatures=/d' -e 's#/update\.json#/update-apatch.json#'
-	UNINSTALL_FILTER = -e '/post-mount\.d/d'
+	MODULE_PROP_SRC = module/src/apatch/module.prop
+	UNINSTALL_SRC = module/src/apatch/uninstall.sh
 else
 	SEPOLICY_SRC = module/src/sepolicy.rule
 	CUSTOMIZE_SRC = module/src/customize.sh
-	MODULE_PROP_FILTER =
-	UNINSTALL_FILTER =
+	MODULE_PROP_SRC = module/src/module.prop
+	UNINSTALL_SRC = module/src/uninstall.sh
 endif
 
 ifeq ($(TERMUX_VERSION),)
@@ -100,7 +100,7 @@ $(MODULE_DONE): $(LOADER_DONE) $(ZYGISKD_DONE) $(MODULE_INPUTS)
 	    -e 's/$${moduleName}/$(MODULE_NAME)/g'                                          \
 	    -e 's/$${versionName}/$(VER_NAME) ($(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE))/g' \
 	    -e 's/$${versionCode}/$(VER_CODE)/g'                                            \
-	    $(MODULE_PROP_FILTER) module/src/module.prop > $(MODULE_OUT)/module.prop
+	    $(MODULE_PROP_SRC) > $(MODULE_OUT)/module.prop
 
 	@echo "Customizing scripts..."
 	@sed \
@@ -112,7 +112,7 @@ $(MODULE_DONE): $(LOADER_DONE) $(ZYGISKD_DONE) $(MODULE_INPUTS)
 	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'                   \
 	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g'                 \
 	    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g'             \
-	    $(UNINSTALL_FILTER) module/src/uninstall.sh > $(MODULE_OUT)/uninstall.sh
+	    $(UNINSTALL_SRC) > $(MODULE_OUT)/uninstall.sh
 	@sed \
 	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'   \
 	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g' \

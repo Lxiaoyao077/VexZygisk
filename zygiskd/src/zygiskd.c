@@ -305,10 +305,27 @@ static void load_modules(struct Context *restrict context) {
     closedir(dir);
 }
 
+/* INFO: Closing the cached end is not enough to retire a companion. Its
+         control socket is handed to every client that asks for it, so any
+         process still holding a duplicate keeps the peer alive and the
+         companion would sit in its recvmsg long after the daemon let go --
+         only to be joined by a fresh one for the same library after the next
+         zygote restart.
+
+         shutdown() acts on the socket itself rather than on one descriptor,
+         so every holder sees the end of the connection at once and the
+         companion exits through its own "control socket closed" path. */
+static void release_zn_companion_fd(int fd) {
+  if (fd < 0) return;
+
+  shutdown(fd, SHUT_RDWR);
+  close(fd);
+}
+
 static void free_zn_companions(struct Context *restrict context) {
   for (size_t i = 0; i < context->zn_companions_len; i++) {
     free(context->zn_companions[i].lib_path);
-    if (context->zn_companions[i].fd >= 0) close(context->zn_companions[i].fd);
+    release_zn_companion_fd(context->zn_companions[i].fd);
   }
 
   free(context->zn_companions);
@@ -973,7 +990,7 @@ static void handle_spawn_zn_companion(struct Client *client) {
 
     LOGI("The Zygisk Next companion of \"%s\" is gone, respawning", lib_path);
 
-    close(companion->fd);
+    release_zn_companion_fd(companion->fd);
     free(companion->lib_path);
 
     memmove(&client->context->zn_companions[i], &client->context->zn_companions[i + 1],

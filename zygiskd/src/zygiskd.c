@@ -416,7 +416,11 @@ static bool zn_matches_target(const char *target, bool is_name, const char *proc
    Returns 0 with the parent end in *out_fd, or -1 on failure. */
 static int exec_companion(char *restrict argv[], const char *restrict tag, const char *restrict mode, int *out_fd) {
   int sockets[2];
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
+  /* INFO: CLOEXEC keeps every unrelated daemon descriptor (the listening
+            socket, other companions' control sockets, accepted client fds)
+            out of the freshly execed companion; the child end is explicitly
+            un-CLOEXEC'ed below, which is what lets it survive the exec. */
+  if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == -1) {
     LOGE("Failed creating the companion socket pair.");
 
     return -1;
@@ -439,7 +443,20 @@ static int exec_companion(char *restrict argv[], const char *restrict tag, const
     close(companion_fd);
 
     int status = 0;
-    waitpid(pid, &status, 0);
+
+    /* INFO: A signal delivered while waiting would otherwise be read as a
+              failed exit: status is still zeroed and WIFEXITED(0) happens to
+              be true, so the daemon would carry on with a socket no companion
+              is holding. */
+    while (waitpid(pid, &status, 0) == -1) {
+      if (errno != EINTR) {
+        LOGE("Failed waiting for the companion intermediate process: %s", strerror(errno));
+
+        close(daemon_fd);
+
+        return -1;
+      }
+    }
 
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
       LOGE("Exited with status %d", status);
@@ -461,7 +478,10 @@ static int exec_companion(char *restrict argv[], const char *restrict tag, const
 
     close(companion_fd);
 
-    exit(1);
+    /* INFO: _exit, not exit: this fork still carries the daemon's stdio
+              buffers and atexit handlers, and running them here would flush
+              the same output the parent is about to flush again. */
+    _exit(1);
   }
 
   char *last = strrchr(argv[0], '/');
@@ -490,7 +510,7 @@ static int exec_companion(char *restrict argv[], const char *restrict tag, const
 
     close(companion_fd);
 
-    exit(1);
+    _exit(1);
   }
 
   if (inner_pid == 0) {
@@ -1002,7 +1022,11 @@ static void handle_request_companion_socket(struct Client *client) {
     }
   }
 
-  if (module->companion <= -1) {
+  /* INFO: Only -1 means "no companion has been attempted yet"; -2 is the
+             cached answer of a spawn that found no entry in the library, and
+             re-running that spawn on every request would fork a process pair
+             each time a companion-less module asks for one. */
+  if (module->companion == -1) {
     module->companion = spawn_companion(client->argv, module->name, module->lib_fd);
 
     if (module->companion >= 0) {
@@ -1052,7 +1076,7 @@ static void handle_get_module_dir(struct Client *client) {
   char module_dir[PATH_MAX];
   snprintf(module_dir, PATH_MAX, "%s/%s", PATH_MODULES_DIR, client->context->modules[index].name);
 
-  int fd = open(module_dir, O_RDONLY);
+  int fd = open(module_dir, O_RDONLY | O_CLOEXEC);
   if (fd == -1) {
     PLOGE("Failed opening module directory");
 
@@ -1163,7 +1187,9 @@ static void serve_loop(int socket_fd, struct Context *restrict context, char *re
   bool first_process = true;
 
   while (1) {
-    int client_fd = accept(socket_fd, NULL, NULL);
+    /* INFO: CLOEXEC on the accepted fd keeps client connections out of the
+              companion processes forked while a handler runs. */
+    int client_fd = accept4(socket_fd, NULL, NULL, SOCK_CLOEXEC);
     if (client_fd == -1) {
       /* A signal (EINTR) only interrupts this one wait; keep serving. */
       if (errno == EINTR) continue;

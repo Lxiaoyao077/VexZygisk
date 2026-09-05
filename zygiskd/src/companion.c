@@ -65,10 +65,13 @@ void *entry_thread(void *arg) {
 
   /* INFO: Only attempt to close the client fd if it appears to be the same file
              and if we can successfully stat it again. This prevents double closes
-             if the module companion already closed the fd.
+             if the module companion already closed the fd. Comparing the device
+             alongside the inode keeps an unrelated fd that was reused for a file
+             with the same inode number on another filesystem from passing.
   */
   struct stat st1;
-  if (fstat(fd, &st1) != -1 && st0.st_ino == st1.st_ino) {
+  if (fstat(fd, &st1) != -1 && st0.st_dev == st1.st_dev && st0.st_ino == st1.st_ino &&
+      ((st0.st_mode ^ st1.st_mode) & S_IFMT) == 0) {
     LOGI(" - Client fd unchanged after module entry, closing it");
 
     close(fd);
@@ -166,7 +169,9 @@ void companion_entry(int fd) {
       close(client_fd);
       free(args);
 
-      break;
+      /* INFO: One failed spawn should not tear down the companion for every
+                later client; keep serving. */
+      continue;
     }
 
     pthread_detach(thread);

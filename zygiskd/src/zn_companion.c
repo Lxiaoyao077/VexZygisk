@@ -115,7 +115,12 @@ void zn_companion_entry(int fd) {
     message.msg_control = buffer.control;
     message.msg_controllen = sizeof(buffer.control);
 
-    if (recvmsg(fd, &message, 0) <= 0) {
+    ssize_t received;
+    do {
+      received = recvmsg(fd, &message, 0);
+    } while (received == -1 && errno == EINTR);
+
+    if (received <= 0) {
       LOGI(" - Control socket closed, companion of \"%s\" is done", path);
 
       break;

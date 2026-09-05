@@ -32,6 +32,8 @@ Each archive targets exactly one root solution and refuses to install from anyth
 - The APatch flavour reads the `apd` package configuration (`/data/adb/ap/package_config`) for root grants and the denylist, and recognises both the `me.bmax.apatch` and `me.yuki.folk` managers. It needs a reasonably recent APatch (`APATCH_VER_CODE >= 10762`).
 - The APatch archive ships its own `sepolicy.rule` written against the `su` domain (APatch builds on magiskpolicy), while the KernelSU one uses the `ksu` domain.
 
+> **Status note:** the KernelSU flavour is the mature, device-tested path. The APatch flavour is a port over the APatch module mechanism (with OnyxZygisk as the reference implementation): it passes the full CI — both flavours compile for both architectures, and the parsers it relies on run in the host-side unit tests — but its **runtime behaviour is still awaiting verification on a real APatch device**. The pieces that specifically need a device before the flavour can be called stable are the scheduling of `/data/adb/post-fs-data.d` under apd, the `APatch`/`kpatch` source names APatch overlays carry in `/proc/.../mountinfo`, and whether the `su`-domain sepolicy rules cover every boot stage.
+
 ## Mount handling
 
 VexZygisk reverts the root and module mounts from zygote itself, once, before the first fork (the same approach OnyxZygisk calls *revert only*). Every process forked afterwards inherits a view that never had those mounts, so denylisted apps need no namespace switch and the daemon does not need to keep a clean namespace alive in a helper process.

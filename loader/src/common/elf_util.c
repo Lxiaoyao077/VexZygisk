@@ -279,12 +279,15 @@ ElfImg *ElfImg_create(const char *elf, void *base) {
     return NULL;
   }
 
-  if (base) {
-    /* INFO: Due to the use in zygisk-ptracer, we need to allow pre-
-              fetched bases to be passed, as the linker (Android 7.1
-              and below) is not loaded from dlopen, which makes it not
-              be visible with dl_iterate_phdr.
-    */
+  /* INFO: Two callers hand in a base and they mean two things unless the
+            convention is pinned down. img->base is always the runtime address
+            the ELF header is mapped at; when no base is given,
+            dl_iterate_phdr yields the load bias (dlpi_addr), which is that
+            address minus the bias computed further down — so the found value
+            is normalized by the bias as soon as it is known. */
+  bool base_provided = base != NULL;
+
+  if (base_provided) {
     img->base = base;
 
     LOGD("Using provided base address 0x%p for %s", base, elf);
@@ -348,6 +351,42 @@ ElfImg *ElfImg_create(const char *elf, void *base) {
 
     return NULL;
   }
+
+  /* INFO: The bias has to be known before the dlpi_addr found above can be
+            normalized, so it is computed here rather than after the section
+            walk. */
+  bool bias_calculated = false;
+  if (img->header->e_phoff > 0 && img->header->e_phnum > 0) {
+    ElfW(Phdr) *phdr = (ElfW(Phdr) *)((uintptr_t)img->header + img->header->e_phoff);
+
+    for (int i = 0; i < img->header->e_phnum; ++i) {
+      if (phdr[i].p_type == PT_LOAD && phdr[i].p_offset == 0) {
+        img->bias = phdr[i].p_vaddr - phdr[i].p_offset;
+        bias_calculated = true;
+
+        LOGD("Calculated bias %ld from PT_LOAD segment %d (vaddr %lx)", (long)img->bias, i, (unsigned long)phdr[i].p_vaddr);
+
+        break;
+      }
+    }
+
+    if (!bias_calculated) for (int i = 0; i < img->header->e_phnum; ++i) {
+      if (phdr[i].p_type != PT_LOAD) continue;
+
+      img->bias = phdr[i].p_vaddr - phdr[i].p_offset;
+      bias_calculated = true;
+
+      LOGD("Calculated bias %ld from first PT_LOAD segment %d (vaddr %lx, offset %lx)",
+          (long)img->bias, i, (unsigned long)phdr[i].p_vaddr, (unsigned long)phdr[i].p_offset);
+
+      break;
+    }
+  }
+
+  if (!bias_calculated)
+    LOGE("Failed to calculate bias for %s. Assuming bias is 0.", elf);
+
+  if (!base_provided && img->base != NULL) img->base = (void *)((uintptr_t)img->base + img->bias);
 
   if (img->header->e_shoff == 0 || img->header->e_shentsize == 0 || img->header->e_shnum == 0) {
     LOGW("Section header table missing or invalid in %s", elf);
@@ -517,37 +556,6 @@ ElfImg *ElfImg_create(const char *elf, void *base) {
     img->symtab_count = 0;
     img->symstr_offset_for_symtab = 0;
   }
-
-  bool bias_calculated = false;
-  if (img->header->e_phoff > 0 && img->header->e_phnum > 0) {
-    ElfW(Phdr) *phdr = (ElfW(Phdr) *)((uintptr_t)img->header + img->header->e_phoff);
-
-    for (int i = 0; i < img->header->e_phnum; ++i) {
-      if (phdr[i].p_type == PT_LOAD && phdr[i].p_offset == 0) {
-        img->bias = phdr[i].p_vaddr - phdr[i].p_offset;
-        bias_calculated = true;
-
-        LOGD("Calculated bias %ld from PT_LOAD segment %d (vaddr %lx)", (long)img->bias, i, (unsigned long)phdr[i].p_vaddr);
-
-        break;
-      }
-    }
-
-    if (!bias_calculated) for (int i = 0; i < img->header->e_phnum; ++i) {
-      if (phdr[i].p_type != PT_LOAD) continue;
-
-      img->bias = phdr[i].p_vaddr - phdr[i].p_offset;
-      bias_calculated = true;
-
-      LOGD("Calculated bias %ld from first PT_LOAD segment %d (vaddr %lx, offset %lx)",
-          (long)img->bias, i, (unsigned long)phdr[i].p_vaddr, (unsigned long)phdr[i].p_offset);
-
-      break;
-    }
-  }
-
-  if (!bias_calculated)
-    LOGE("Failed to calculate bias for %s. Assuming bias is 0.", elf);
 
   if (!img->dynsym_start || !img->strtab_start) {
     if (img->header->e_type == ET_DYN) LOGE("Failed to find .dynsym or its string table (.dynstr) in %s", elf);

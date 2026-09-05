@@ -176,10 +176,13 @@ static int zn_inline_unhook(void *target) {
   return ZN_SUCCESS;
 }
 
+/* INFO: st_value is a link-time vaddr; the runtime address is the mapped ELF
+         header (img->base) shifted by the difference to the first PT_LOAD's
+         vaddr (img->bias), the same conversion getSymbAddress performs. */
 static void *symbol_to_address(ElfImg *img, ElfW(Sym) *sym) {
   if (sym->st_value == 0) return NULL;
 
-  return (void *)((uintptr_t)img->base + sym->st_value);
+  return (void *)((uintptr_t)img->base + sym->st_value - img->bias);
 }
 
 /* INFO: Lookup order mirrors Zygisk Next: an exact lookup prefers the dynamic

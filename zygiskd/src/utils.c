@@ -118,7 +118,7 @@ void unix_datagram_sendto(const char *restrict path, const void *restrict buf, s
   };
   strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
 
-  int socket_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  int socket_fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
   if (socket_fd == -1) {
     LOGE("socket: %s", strerror(errno));
 
@@ -158,7 +158,7 @@ int unix_listener_from_path(const char *restrict path) {
     return -1;
   }
 
-  int socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int socket_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (socket_fd == -1) {
     LOGE("socket: %s", strerror(errno));
 
@@ -178,7 +178,10 @@ int unix_listener_from_path(const char *restrict path) {
     return -1;
   }
 
-  if (listen(socket_fd, 2) == -1) {
+  /* INFO: A backlog of 2 dropped connections whenever several zygote forks
+             connected at once; the loader retries once at 100 ms, so a drop
+             cost a whole inject attempt. */
+  if (listen(socket_fd, 16) == -1) {
     LOGE("listen: %s", strerror(errno));
 
     close(socket_fd);
@@ -505,36 +508,66 @@ void free_mounts(struct mountinfos *restrict mounts) {
   free(mounts->mounts);
 }
 
+/* INFO: One mountinfo line, split on the " - " separator, which is the only
+         delimiter that cannot appear inside a field. The line is cut in place
+         so arbitrarily long paths cost nothing beyond the getline buffer:
+
+           36 35 98:0 /root /target rw,... - type source rw,...
+*/
+static bool mountinfo_parse_line(char *line, struct mountinfo *out) {
+  char *separator = strstr(line, " - ");
+  if (separator == NULL) return false;
+
+  *separator = '\0';
+
+  char root[4096], target[4096], source[4096], type[128];
+
+  if (sscanf(line, "%*u %*u %*u:%*u %4095s %4095s", root, target) != 2) return false;
+
+  /* INFO: After the separator come the filesystem type and the source; some
+            pseudo-filesystems carry no source and cannot be a root mount. */
+  if (sscanf(separator + 3, "%127s %4095s", type, source) != 2) return false;
+
+  out->root = strdup(root);
+  out->target = strdup(target);
+  out->source = strdup(source);
+
+  if (out->root == NULL || out->target == NULL || out->source == NULL) {
+    free(out->root);
+    free(out->target);
+    free(out->source);
+
+    out->root = NULL;
+    out->target = NULL;
+    out->source = NULL;
+
+    return false;
+  }
+
+  return true;
+}
+
 bool parse_mountinfo(const char *restrict pid, struct mountinfos *restrict mounts) {
   char path[PATH_MAX];
   snprintf(path, PATH_MAX, "/proc/%s/mountinfo", pid);
 
-  FILE *mountinfo = fopen(path, "r");
+  FILE *mountinfo = fopen(path, "re");
   if (mountinfo == NULL) {
     LOGE("fopen: %s", strerror(errno));
 
     return false;
   }
 
-  char line[PATH_MAX];
+  char *line = NULL;
+  size_t line_capacity = 0;
   size_t i = 0;
 
   mounts->mounts = NULL;
   mounts->length = 0;
 
-  while (fgets(line, sizeof(line), mountinfo) != NULL) {
-    int root_start = 0, root_end = 0;
-    int target_start = 0, target_end = 0;
-    int source_start = 0, source_end = 0;
-    sscanf(line,
-      "%*u %*u %*u:%*u " /* mount id, parent id, maj:min */
-      "%n%*s%n "         /* root */
-      "%n%*s%n "         /* target */
-      "%*s%*[^-] - "     /* vfs options, optional fields, separator */
-      "%*s "             /* FS type */
-      "%n%*s%n",         /* source */
-      &root_start, &root_end, &target_start, &target_end,
-      &source_start, &source_end);
+  while (getline(&line, &line_capacity, mountinfo) > 0) {
+    size_t length = strlen(line);
+    while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r')) line[--length] = '\0';
 
     struct mountinfo *tmp_mounts = (struct mountinfo *)realloc(mounts->mounts, (i + 1) * sizeof(struct mountinfo));
     if (!tmp_mounts) {
@@ -544,28 +577,21 @@ bool parse_mountinfo(const char *restrict pid, struct mountinfos *restrict mount
     }
     mounts->mounts = tmp_mounts;
 
-    /* INFO: Zeroed before filling so a failure partway through leaves a
-             freeable entry behind. */
     struct mountinfo *mount = &mounts->mounts[i];
-    mount->root = NULL;
-    mount->target = NULL;
-    mount->source = NULL;
-    mounts->length = i + 1;
 
-    mount->root = strndup(line + root_start, (size_t)(root_end - root_start));
-    mount->target = strndup(line + target_start, (size_t)(target_end - target_start));
-    mount->source = strndup(line + source_start, (size_t)(source_end - source_start));
+    if (!mountinfo_parse_line(line, mount)) {
+      LOGV("Skipping malformed mountinfo line: %s", line);
 
-    /* INFO: strndup only returns NULL on allocation failure. */
-    if (mount->root == NULL || mount->target == NULL || mount->source == NULL) {
-      LOGE("Failed to allocate memory for a mount entry");
-
-      goto cleanup_mount_allocs;
+      /* INFO: The slot is left to be reused by the next line; the length only
+                counts fully parsed entries, so consumers never see NULL
+                fields. */
+      continue;
     }
 
-    i++;
+    mounts->length = ++i;
   }
 
+  free(line);
   fclose(mountinfo);
 
   return true;
@@ -574,10 +600,23 @@ bool parse_mountinfo(const char *restrict pid, struct mountinfos *restrict mount
     /* INFO: The length counts every allocated entry, so free_mounts
              releases exactly what was built. */
     free_mounts(mounts);
+    free(line);
     fclose(mountinfo);
 
     return false;
 }
+
+/* INFO: The overlay mounts of each root solution carry its own source name:
+         KernelSU reports "KSU", APatch reports "APatch" or "kpatch". The
+         flavour is fixed at build time, so only the matching names are
+         compiled in — the same table the loader keeps in injector/unmount.c. */
+#ifdef ROOT_IMPL_APATCH
+  static const char *const kRootSources[] = { "APatch", "kpatch" };
+  #define ROOT_SOURCE_COUNT 2
+#else
+  static const char *const kRootSources[] = { "KSU" };
+  #define ROOT_SOURCE_COUNT 1
+#endif
 
 bool umount_root(void) {
   /* INFO: This runs in a child that already setns'ed into the target pid's
@@ -589,7 +628,7 @@ bool umount_root(void) {
     return false;
   }
 
-  const char *source_name = "KSU";
+  const char *source_name = kRootSources[0];
 
   LOGI("[%s] Unmounting root", source_name);
 
@@ -600,7 +639,9 @@ bool umount_root(void) {
     struct mountinfo mount = mounts.mounts[i];
 
     bool should_unmount = false;
-    if (strcmp(mount.source, source_name) == 0) should_unmount = true;
+    for (size_t s = 0; s < ROOT_SOURCE_COUNT && !should_unmount; s++) {
+      if (strcmp(mount.source, kRootSources[s]) == 0) should_unmount = true;
+    }
     if (strncmp(mount.target, "/data/adb/modules", strlen("/data/adb/modules")) == 0) should_unmount = true;
     if (strncmp(mount.root, "/adb/modules/", strlen("/adb/modules/")) == 0) should_unmount = true;
 
@@ -649,7 +690,7 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
   if (mns_state == Clean && clean_namespace_fd != -1) return clean_namespace_fd;
 
   int sockets[2];
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
+  if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == -1) {
     LOGE("socketpair: %s", strerror(errno));
 
     return -1;
@@ -667,6 +708,18 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
 
     return -1;
   }
+
+  /* INFO: Every early return below leaves the helper child running or dead;
+            reaping it keeps a long-lived daemon from collecting zombies. */
+  #define FAIL_MNS(message)                                    \
+    do {                                                       \
+      LOGE("%s: %s", message, strerror(errno));                \
+                                                                 \
+      close(socket_parent);                                    \
+      waitpid(fork_pid, NULL, 0);                              \
+                                                                 \
+      return -1;                                               \
+    } while (0)
 
   if (fork_pid == 0) {
     close(socket_parent);
@@ -714,18 +767,13 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
   close(socket_child);
 
   uint8_t has_succeeded = 0;
-  if (read_uint8_t(socket_parent, &has_succeeded) == -1) {
-    LOGE("Failed to read from socket_parent: %s", strerror(errno));
-
-    close(socket_parent);
-
-    return -1;
-  }
+  if (read_uint8_t(socket_parent, &has_succeeded) == -1) FAIL_MNS("Failed to read from socket_parent");
 
   if (!has_succeeded) {
     LOGE("Failed to umount root");
 
     close(socket_parent);
+    waitpid(fork_pid, NULL, 0);
 
     return -1;
   }
@@ -733,31 +781,21 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
   char ns_path[PATH_MAX];
   snprintf(ns_path, PATH_MAX, "/proc/%d/ns/mnt", fork_pid);
 
-  int ns_fd = open(ns_path, O_RDONLY);
-  if (ns_fd == -1) {
-    LOGE("open: %s", strerror(errno));
-
-    close(socket_parent);
-
-    return -1;
-  }
+  /* INFO: CLOEXEC only matters at exec time; the fd stays open in the daemon
+            for the loader to reach through /proc, but never leaks into a
+            companion spawned afterwards. */
+  int ns_fd = open(ns_path, O_RDONLY | O_CLOEXEC);
+  if (ns_fd == -1) FAIL_MNS("open");
 
   uint8_t opened_signal = 1;
   if (write_uint8_t(socket_parent, opened_signal) == -1) {
-    LOGE("Failed to write to socket_parent: %s", strerror(errno));
-
     close(ns_fd);
-    close(socket_parent);
-
-    return -1;
+    FAIL_MNS("Failed to write to socket_parent");
   }
 
   if (close(socket_parent) == -1) {
-    LOGE("Failed to close socket_parent: %s", strerror(errno));
-
     close(ns_fd);
-
-    return -1;
+    FAIL_MNS("Failed to close socket_parent");
   }
 
   if (waitpid(fork_pid, NULL, 0) == -1) {
@@ -771,4 +809,6 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
   clean_namespace_fd = ns_fd;
 
   return ns_fd;
+
+  #undef FAIL_MNS
 }

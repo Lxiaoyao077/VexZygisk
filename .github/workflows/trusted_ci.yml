@@ -52,6 +52,7 @@ jobs:
              tests/host/test_elf_util.c /tmp/elf_util.o /tmp/lzma_dec.o \
              -o /tmp/test_elf_util
           python3 tests/host/make_debugdata.py /tmp/debugdata
+          readelf -S /tmp/debugdata-plain.elf
           /tmp/test_elf_util /tmp/debugdata /tmp/test_elf_util
 
       - name: Generate update.json

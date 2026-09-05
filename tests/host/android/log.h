@@ -2,8 +2,11 @@
 #define ANDROID_LOG_H
 
 /* INFO: Stand-in for bionic's <android/log.h> so the loader sources can be
-         compiled on the build host. The tests assert on return values, never
-         on output, so logging is dropped rather than printed. */
+         compiled on the build host. Tests assert on return values, so the log
+         only goes to stderr, where it is visible when a run fails. */
+
+#include <stdarg.h>
+#include <stdio.h>
 
 #define ANDROID_LOG_UNKNOWN 0
 #define ANDROID_LOG_DEFAULT 1
@@ -16,8 +19,15 @@
 
 static inline int __android_log_print(int prio, const char *tag, const char *fmt, ...) {
   (void) prio;
-  (void) tag;
-  (void) fmt;
+
+  va_list args;
+  va_start(args, fmt);
+
+  fprintf(stderr, "[%s] ", tag);
+  vfprintf(stderr, fmt, args);
+  fputc('\n', stderr);
+
+  va_end(args);
 
   return 0;
 }

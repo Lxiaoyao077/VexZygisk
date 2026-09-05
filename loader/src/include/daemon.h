@@ -35,7 +35,8 @@ struct zn_module_file {
 };
 
 enum root_impl {
-  ROOT_IMPL_KERNELSU
+  ROOT_IMPL_KERNELSU,
+  ROOT_IMPL_APATCH
 };
 
 struct rezygisk_info {

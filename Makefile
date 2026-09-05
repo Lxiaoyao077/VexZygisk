@@ -1,4 +1,8 @@
-BUILD_DIR := $(CURDIR)/build
+# INFO: The same sources build for two root solutions. FLAVOR_DIR keeps the
+#       build trees apart so the ksu and apatch flavours can live side by side
+#       (and so a cached .done from one cannot mask the other).
+FLAVOR_DIR ?=
+BUILD_DIR := $(CURDIR)/build$(FLAVOR_DIR)
 
 include common.mk
 
@@ -10,6 +14,16 @@ ZKSU_VERSION = $(VER_NAME)-$(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE)
 
 ZIP_NAME = $(MODULE_NAME)-$(VER_NAME)-$(VER_CODE)-$(COMMIT_HASH)-$(BUILD_TYPE).zip
 ZIP_FILE = $(ZIP_DIR)/$(ZIP_NAME)
+
+# INFO: Only the install-time policy and the archive differ per flavour; the
+#       binaries themselves already carry the ROOT_IMPL macro.
+ifeq ($(ROOT_IMPL),apatch)
+	SEPOLICY_SRC = module/src/apatch/sepolicy.rule
+	CUSTOMIZE_SRC = module/src/apatch/customize.sh
+else
+	SEPOLICY_SRC = module/src/sepolicy.rule
+	CUSTOMIZE_SRC = module/src/customize.sh
+endif
 
 ifeq ($(TERMUX_VERSION),)
 	ADB_CMD := adb push $(ZIP_FILE) /data/local/tmp && adb shell 
@@ -34,7 +48,7 @@ MODULE_INPUTS = scripts/sign.py \
         $(shell find module/src -type f | sort) \
         $(wildcard module/private_key module/public_key)
 
-.PHONY: debug release all build clean          \
+.PHONY: debug release all apatch build clean        \
         installKsu installKsuAndReboot
 
 debug:
@@ -44,6 +58,11 @@ release:
 	$(MAKE) BUILD_TYPE=release BUILD_DIR=$(BUILD_DIR) build
 
 all: debug release
+
+# INFO: The APatch flavour lives in its own tree (build-apatch) and ships
+#       under its own archive name, so a single workflow run yields both.
+apatch:
+	$(MAKE) release ROOT_IMPL=apatch MODULE_NAME=VexZygisk-APatch FLAVOR_DIR=-apatch
 
 build: $(ZIP_FILE)
 
@@ -63,7 +82,8 @@ $(MODULE_DONE): $(LOADER_DONE) $(ZYGISKD_DONE) $(MODULE_INPUTS)
 	@mkdir -p $(MODULE_OUT)
 
 	@echo "Copying module files..."
-	@cp module/src/verify.sh module/src/sepolicy.rule module/src/rezygisk.sh $(MODULE_OUT)/
+	@cp module/src/verify.sh module/src/rezygisk.sh $(MODULE_OUT)/
+	@cp $(SEPOLICY_SRC) $(MODULE_OUT)/sepolicy.rule
 
 	@echo "Customizing module.prop..."
 	@sed -e 's/$${moduleId}/$(MODULE_ID)/g'                                             \
@@ -73,12 +93,18 @@ $(MODULE_DONE): $(LOADER_DONE) $(ZYGISKD_DONE) $(MODULE_INPUTS)
 	    module/src/module.prop > $(MODULE_OUT)/module.prop
 
 	@echo "Customizing scripts..."
-	@for script in customize.sh post-fs-data.sh uninstall.sh; do \
+	@for script in post-fs-data.sh uninstall.sh; do \
 		sed \
 		    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'                   \
 		    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g'                 \
+		    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g'             \
 		    module/src/$$script > $(MODULE_OUT)/$$script;                   \
 	done
+	@sed \
+	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'   \
+	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g' \
+	    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g' \
+	    $(CUSTOMIZE_SRC) > $(MODULE_OUT)/customize.sh
 
 	@echo "Copying binaries..."
 	@for arch in $(ARCHS); do                                                                                  \

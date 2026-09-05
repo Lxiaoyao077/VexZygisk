@@ -474,6 +474,11 @@ void stringify_root_impl_name(struct root_impl impl, char *restrict output) {
 
       break;
     }
+    case APatch: {
+      strcpy(output, "APatch");
+
+      break;
+    }
   }
 }
 

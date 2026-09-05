@@ -91,6 +91,11 @@ int main(int argc, char **argv) {
 
         break;
       }
+      case ROOT_IMPL_APATCH: {
+        printf("Root implementation: APatch\n");
+
+        break;
+      }
     }
 
     if (info.modules.modules_count != 0) {

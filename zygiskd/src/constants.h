@@ -14,6 +14,7 @@
 #define PROCESS_GRANTED_ROOT (1u << 0)
 #define PROCESS_ON_DENYLIST (1u << 1)
 #define PROCESS_IS_MANAGER (1u << 27)
+#define PROCESS_ROOT_IS_APATCH (1u << 28)
 #define PROCESS_ROOT_IS_KSU (1u << 29)
 #define PROCESS_IS_FIRST_STARTED (1u << 31)
 

@@ -7,8 +7,12 @@
 
 #include "../constants.h"
 
+/* INFO: Which backend the daemon was built for. Only one is compiled in, but
+         both stay in the enum so the impl-name switch and the string table
+         are shared. */
 enum root_impls {
-  KernelSU
+  KernelSU,
+  APatch
 };
 
 struct root_impl_state {

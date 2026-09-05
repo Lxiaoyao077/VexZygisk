@@ -109,13 +109,17 @@ void rezygiskd_get_info(struct rezygisk_info *info) {
 
   safe_write(write_uint8_t(fd, (uint8_t)GetInfo), "GetInfo action", return);
 
-  /* INFO: The flags word is consumed to stay in step with the protocol;
-            only the KernelSU implementation exists and the daemon always
-            sets its bit. */
+  /* INFO: The flags word is consumed to stay in step with the protocol; the
+            daemon always sets the bit of the root solution it was built for,
+            which this flavour is built to match. */
   uint32_t flags = 0;
   safe_read(read_uint32_t(fd, &flags), "info flags", return);
 
+#ifdef ROOT_IMPL_APATCH
+  info->root_impl = ROOT_IMPL_APATCH;
+#else
   info->root_impl = ROOT_IMPL_KERNELSU;
+#endif
 
   uint32_t daemon_pid = 0;
   safe_read(read_uint32_t(fd, &daemon_pid), "pid", return);

@@ -13,6 +13,18 @@ COMMIT_HASH ?= $(shell git -C "$(ROOT_DIR)" rev-parse --verify --short HEAD 2>/d
 
 MIN_KSU_VERSION ?= 10940
 MIN_KSUD_VERSION ?= 11425
+MIN_APATCH_VERSION ?= 10762
+
+# INFO: Which root solution the binaries are built for: ksu (default) or
+#       apatch. The two flavours ship as separate archives.
+ROOT_IMPL ?= ksu
+
+ifeq ($(ROOT_IMPL),apatch)
+	ROOT_IMPL_DEF = -DROOT_IMPL_APATCH
+else
+	ROOT_IMPL = ksu
+	ROOT_IMPL_DEF =
+endif
 
 MODULE_ID ?= rezygisk
 MODULE_NAME ?= VexZygisk

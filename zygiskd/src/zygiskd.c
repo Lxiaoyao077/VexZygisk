@@ -18,6 +18,15 @@
 #include "root_impl/common.h"
 #include "utils.h"
 
+/* INFO: The flag naming the root solution this daemon was built for. Only the
+         corresponding bit is ever set; the loader matches on whichever root
+         it is told about. */
+#ifdef ROOT_IMPL_APATCH
+  #define PROCESS_ROOT_IS_ACTIVE PROCESS_ROOT_IS_APATCH
+#else
+  #define PROCESS_ROOT_IS_ACTIVE PROCESS_ROOT_IS_KSU
+#endif
+
 struct Module {
   char *name;
   int lib_fd;
@@ -823,7 +832,7 @@ static void handle_get_process_flags(struct Client *client) {
     }
   }
 
-  flags |= PROCESS_ROOT_IS_KSU;
+  flags |= PROCESS_ROOT_IS_ACTIVE;
 
   ret = write_uint32_t(client->fd, flags);
   ASSURE_SIZE_WRITE("GetProcessFlags", "flags", ret, sizeof(flags), return);
@@ -832,7 +841,7 @@ static void handle_get_process_flags(struct Client *client) {
 static void handle_get_info(struct Client *client) {
   uint32_t flags = 0;
 
-  flags |= PROCESS_ROOT_IS_KSU;
+  flags |= PROCESS_ROOT_IS_ACTIVE;
 
   ssize_t ret = write_uint32_t(client->fd, flags);
   ASSURE_SIZE_WRITE("GetInfo", "flags", ret, sizeof(flags), return);

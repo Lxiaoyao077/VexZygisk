@@ -17,11 +17,6 @@
          namespace, is kept as the fallback for the cases where reverting is
          refused (see the /product guard in unmount.c). */
 
-/* INFO: KernelSU is the only root implementation VexZygisk supports, so the
-         source name used to recognise its mounts is a constant rather than
-         something derived from the process flags. */
-#define KSU_MOUNT_SOURCE "KSU"
-
 /* Attempts to unmount the root and module traces from zygote.
 
    Returns true when zygote is known to be clean, either because this call

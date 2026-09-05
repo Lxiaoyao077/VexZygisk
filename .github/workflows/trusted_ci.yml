@@ -32,6 +32,7 @@ jobs:
       - name: Build
         run: |
           make all -j$(nproc)
+          make apatch -j$(nproc)
 
       - name: Host unit tests
         # INFO: The loader cannot run on this host, but its ELF reader can, and
@@ -105,11 +106,15 @@ jobs:
       - name: Upload release
         uses: actions/upload-artifact@v7
         with:
-          path: "build/out/VexZygisk-v*-release.zip"
+          path: |
+            build/out/VexZygisk-v*-release.zip
+            build-apatch/out/VexZygisk-APatch-v*-release.zip
           archive: false
 
       - name: Upload debug
         uses: actions/upload-artifact@v7
         with:
-          path: "build/out/VexZygisk-v*-debug.zip"
+          path: |
+            build/out/VexZygisk-v*-debug.zip
+            build-apatch/out/VexZygisk-APatch-v*-debug.zip
           archive: false

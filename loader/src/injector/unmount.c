@@ -16,6 +16,18 @@
 #define PRODUCT_MOUNT "/product"
 #define PRODUCT_BIN_MOUNT "/product/bin"
 
+/* INFO: The overlay mounts of each root solution carry its own source name:
+         KernelSU reports "KSU" and APatch reports "APatch" or "kpatch". The
+         flavour is fixed at build time, so only the matching names are
+         compiled in. */
+#ifdef ROOT_IMPL_APATCH
+  static const char *const kRootSources[] = { "APatch", "kpatch" };
+  #define ROOT_SOURCE_COUNT 2
+#else
+  static const char *const kRootSources[] = { "KSU" };
+  #define ROOT_SOURCE_COUNT 1
+#endif
+
 /* INFO: The fields of one /proc/<pid>/mountinfo line. Only what the trace
          selection and the unmount actually need is kept. */
 struct mount_info {
@@ -169,7 +181,11 @@ static bool mount_list_parse(struct mount_list *out) {
 /* INFO: KernelSU keeps its modules on a loop device, and that device name
          shows up as the source of every module mount. It is not known ahead
          of time, so it is taken from the modules directory mount itself. */
+/* INFO: KernelSU keeps its modules on a loop device, and that device name
+         shows up as the source of every module mount. APatch mounts them as a
+         plain overlay, so only the KernelSU flavour looks for it. */
 static const char *find_module_loop_source(const struct mount_list *all) {
+#ifndef ROOT_IMPL_APATCH
   for (size_t i = 0; i < all->len; i++) {
     const struct mount_info *info = &all->items[i];
 
@@ -180,6 +196,7 @@ static const char *find_module_loop_source(const struct mount_list *all) {
       return info->source;
     }
   }
+#endif
 
   return NULL;
 }
@@ -187,7 +204,10 @@ static const char *find_module_loop_source(const struct mount_list *all) {
 static bool carries_root_trace(const struct mount_info *info, const char *loop_source) {
   if (strncmp(info->root, KSU_MODULES_ROOT, strlen(KSU_MODULES_ROOT)) == 0) return true;
   if (strncmp(info->target, KSU_MODULES_DIR, strlen(KSU_MODULES_DIR)) == 0) return true;
-  if (strcmp(info->source, KSU_MOUNT_SOURCE) == 0) return true;
+
+  for (size_t i = 0; i < ROOT_SOURCE_COUNT; i++) {
+    if (strcmp(info->source, kRootSources[i]) == 0) return true;
+  }
 
   return loop_source != NULL && strcmp(info->source, loop_source) == 0;
 }

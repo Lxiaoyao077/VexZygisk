@@ -22,6 +22,7 @@ endif
 #       CXXFLAGS below.
 LOADER_CFLAGS = -std=c18 -D_GNU_SOURCE -Wall -Wextra -fno-stack-protector -fomit-frame-pointer \
 				-Wno-builtin-macro-redefined                                                 \
+				$(ROOT_IMPL_DEF)                                                            \
 				'-D__FILE__=__FILE_NAME__' -DZKSU_VERSION=\"$(ZKSU_VERSION)\"
 
 COMMON_LDFLAGS = -static-libstdc++ -Wl,--build-id=sha1 -Wl,--no-rosegment           \

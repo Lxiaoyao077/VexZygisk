@@ -310,7 +310,14 @@ static void load_modules(struct Context *restrict context) {
 
          shutdown() acts on the socket itself rather than on one descriptor,
          so every holder sees the end of the connection at once and the
-         companion exits through its own "control socket closed" path. */
+         companion exits through its own "control socket closed" path.
+
+         Lifecycle review conclusion (kept as-is): the double fork hands the
+         companion to init, so the daemon cannot and must not waitpid it; a
+         companion wedged before its recvmsg loop — inside a module
+         constructor — cannot see the shutdown until that returns, which the
+         bounded handshake in exec_companion already isolates from the
+         daemon. No process accounting is added on top. */
 static void release_zn_companion_fd(int fd) {
   if (fd < 0) return;
 

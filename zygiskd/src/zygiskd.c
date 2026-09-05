@@ -50,6 +50,9 @@ struct Context {
 
   struct ZnModule *zn_modules;
   size_t zn_len;
+
+  struct ZnCompanion *zn_companions;
+  size_t zn_companions_len;
 };
 
 /* INFO: A Zygisk Next library resolved for one target: its path, whether the
@@ -57,6 +60,14 @@ struct Context {
 struct ZnModuleFile {
   char *lib_path;
   bool companion;
+  int fd;
+};
+
+/* INFO: One live Zygisk Next companion process, kept for the daemon's
+         lifetime and handed out by descriptor duplication. Keyed by library
+         path, since ZN companions are per module library, not per request. */
+struct ZnCompanion {
+  char *lib_path;
   int fd;
 };
 
@@ -294,6 +305,17 @@ static void load_modules(struct Context *restrict context) {
     closedir(dir);
 }
 
+static void free_zn_companions(struct Context *restrict context) {
+  for (size_t i = 0; i < context->zn_companions_len; i++) {
+    free(context->zn_companions[i].lib_path);
+    if (context->zn_companions[i].fd >= 0) close(context->zn_companions[i].fd);
+  }
+
+  free(context->zn_companions);
+  context->zn_companions = NULL;
+  context->zn_companions_len = 0;
+}
+
 static void free_modules(struct Context *restrict context) {
   for (size_t i = 0; i < context->len; i++) {
     free(context->modules[i].name);
@@ -318,6 +340,8 @@ static void free_modules(struct Context *restrict context) {
   free(context->zn_modules);
   context->zn_modules = NULL;
   context->zn_len = 0;
+
+  free_zn_companions(context);
 }
 
 static void free_zn_module_files(struct ZnModuleFile *files, size_t len) {
@@ -915,6 +939,39 @@ static void handle_spawn_zn_companion(struct Client *client) {
     return;
   }
 
+  /* INFO: One companion per library instead of one per request: the process
+             and its dlopened library are kept for the daemon's lifetime, a
+             restarted zygote or a newly forked app reuses it, and the
+             per-process fork storm of the per-request model disappears. A
+             dead companion is detected here and respawned on demand. */
+  for (size_t i = 0; i < client->context->zn_companions_len; i++) {
+    struct ZnCompanion *companion = &client->context->zn_companions[i];
+
+    if (strcmp(companion->lib_path, lib_path) != 0) continue;
+
+    if (check_unix_socket(companion->fd, false)) {
+      LOGI("Reusing the Zygisk Next companion of \"%s\"", lib_path);
+
+      ret = write_uint8_t(client->fd, (uint8_t)1);
+      ASSURE_SIZE_WRITE("SpawnZnCompanion", "response", ret, sizeof(uint8_t), return);
+
+      if (write_fd(client->fd, companion->fd) == -1) LOGE("Failed sending the Zygisk Next companion fd.");
+
+      return;
+    }
+
+    LOGI("The Zygisk Next companion of \"%s\" is gone, respawning", lib_path);
+
+    close(companion->fd);
+    free(companion->lib_path);
+
+    memmove(&client->context->zn_companions[i], &client->context->zn_companions[i + 1],
+            (client->context->zn_companions_len - i - 1) * sizeof(struct ZnCompanion));
+    client->context->zn_companions_len--;
+
+    break;
+  }
+
   int companion_fd = spawn_zn_companion(client->argv, lib_path);
   if (companion_fd < 0) {
     LOGE("Failed spawning the Zygisk Next companion of \"%s\"", lib_path);
@@ -927,18 +984,37 @@ static void handle_spawn_zn_companion(struct Client *client) {
 
   LOGI("Spawned the Zygisk Next companion of \"%s\"", lib_path);
 
-  ret = write_uint8_t(client->fd, (uint8_t)1);
-  if (ret != (ssize_t)sizeof(uint8_t)) {
-    LOGE("Failed confirming the Zygisk Next companion.");
+  /* INFO: The socket belongs to the context from here on; serving this
+             client only duplicates it. If the bookkeeping cannot keep up,
+             the healthy companion still serves this one client untracked. */
+  struct ZnCompanion *tmp = realloc(client->context->zn_companions,
+                                    (client->context->zn_companions_len + 1) * sizeof(struct ZnCompanion));
+  char *lib_path_copy = tmp != NULL ? strdup(lib_path) : NULL;
+
+  if (tmp == NULL || lib_path_copy == NULL) {
+    LOGW("Failed tracking the Zygisk Next companion of \"%s\"", lib_path);
+
+    free(lib_path_copy);
+
+    ret = write_uint8_t(client->fd, (uint8_t)1);
+    ASSURE_SIZE_WRITE("SpawnZnCompanion", "response", ret, sizeof(uint8_t), return);
+
+    if (write_fd(client->fd, companion_fd) == -1) LOGE("Failed sending the Zygisk Next companion fd.");
 
     close(companion_fd);
 
     return;
   }
 
-  if (write_fd(client->fd, companion_fd) == -1) LOGE("Failed sending the Zygisk Next companion fd.");
+  client->context->zn_companions = tmp;
+  client->context->zn_companions[client->context->zn_companions_len].lib_path = lib_path_copy;
+  client->context->zn_companions[client->context->zn_companions_len].fd = companion_fd;
+  client->context->zn_companions_len++;
 
-  close(companion_fd);
+  ret = write_uint8_t(client->fd, (uint8_t)1);
+  ASSURE_SIZE_WRITE("SpawnZnCompanion", "response", ret, sizeof(uint8_t), return);
+
+  if (write_fd(client->fd, companion_fd) == -1) LOGE("Failed sending the Zygisk Next companion fd.");
 }
 
 static void handle_read_zn_modules(struct Client *client) {

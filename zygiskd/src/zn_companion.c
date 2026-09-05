@@ -8,8 +8,10 @@
 #include <string.h>
 
 #include <dlfcn.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <linux/limits.h>
@@ -46,14 +48,54 @@ static struct ZygiskNextCompanionModule *load_companion_module(int library_fd) {
 
 /* INFO: Entry point of "zygiskd zn-companion <fd>", a process forked from the
          daemon so the companion keeps the daemon's SELinux domain instead of
-         the restricted one of the target that loaded the module.
+         the restricted one of the target that loaded the module. One process
+         serves one library for the daemon's whole lifetime; every connecting
+         process gets a duplicate of the control socket.
 
          Protocol, mirroring the Zygisk Next contract:
          1. the library path and its fd arrive on the control socket
          2. one byte goes back: 1 when the companion is ready, 0 otherwise
          3. onCompanionLoaded runs once
          4. every connectCompanion call sends a command byte plus an fd
-            through SCM_RIGHTS, which is handed to onModuleConnected */
+            through SCM_RIGHTS; each is handed to onModuleConnected on its
+            own thread, so one blocking module connection cannot starve the
+            others. */
+struct zn_client_thread_args {
+  int fd;
+  void (*on_module_connected)(int);
+};
+
+static void *zn_client_thread(void *arg) {
+  struct zn_client_thread_args *args = (struct zn_client_thread_args *)arg;
+
+  int fd = args->fd;
+  void (*on_module_connected)(int) = args->on_module_connected;
+
+  free(args);
+
+  struct stat st0 = { 0 };
+  if (fstat(fd, &st0) == -1) {
+    LOGE(" - Failed to stat the connection fd: %s", strerror(errno));
+
+    return NULL;
+  }
+
+  on_module_connected(fd);
+
+  /* INFO: Same heuristic as the standard companion: only close the fd if it
+             still describes the same file, so a module that already closed
+             it does not cause a double close on a recycled descriptor. */
+  struct stat st1;
+  if (fstat(fd, &st1) != -1 && st0.st_dev == st1.st_dev && st0.st_ino == st1.st_ino &&
+      ((st0.st_mode ^ st1.st_mode) & S_IFMT) == 0) {
+    LOGI(" - Connection fd unchanged after onModuleConnected, closing it");
+
+    close(fd);
+  }
+
+  return NULL;
+}
+
 void zn_companion_entry(int fd) {
   LOGI("New Zygisk Next companion. Control fd: %d", fd);
 
@@ -150,7 +192,29 @@ void zn_companion_entry(int fd) {
       continue;
     }
 
-    module->onModuleConnected(connection_fd);
+    struct zn_client_thread_args *args = malloc(sizeof(struct zn_client_thread_args));
+    if (args == NULL) {
+      LOGE("Failed allocating the client thread args");
+
+      close(connection_fd);
+
+      continue;
+    }
+
+    args->fd = connection_fd;
+    args->on_module_connected = module->onModuleConnected;
+
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, zn_client_thread, args) != 0) {
+      LOGE("Failed creating a thread for the module connection");
+
+      close(connection_fd);
+      free(args);
+
+      continue;
+    }
+
+    pthread_detach(thread);
   }
 
   cleanup:

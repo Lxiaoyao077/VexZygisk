@@ -817,6 +817,11 @@ static void handle_zygote_restart(struct Client *client) {
     client->context->modules[i].companion = -1;
   }
 
+  /* INFO: The new zygote has not forked anything yet, so the first process
+            it specializes should count as "first" again: that is what arms
+            the clean mount namespace probe on the loader side. */
+  *client->first_process = true;
+
   reload_modules(client->context);
 }
 

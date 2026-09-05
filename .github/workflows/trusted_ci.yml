@@ -90,6 +90,22 @@ jobs:
               ["git", "describe", "--tags", "--abbrev=0"],
               capture_output=True, text=True).stdout.strip()
 
+          # INFO: The zipUrl points at a release named exactly after the
+          #       version; warn while it is still cheap to notice.
+          head = subprocess.run(
+              ["git", "rev-parse", "HEAD"],
+              capture_output=True, text=True).stdout.strip()
+
+          tag = subprocess.run(
+              ["git", "rev-parse", "-q", "--verify", f"refs/tags/{version}"],
+              capture_output=True, text=True).stdout.strip()
+
+          if not tag:
+              print(f"WARNING: tag {version} does not exist yet; "
+                    f"update.json's zipUrl will 404 until it is cut")
+          elif tag != head:
+              print(f"WARNING: tag {version} does not point at HEAD ({tag})")
+
           revisions = f"{previous}..HEAD" if previous else "-50"
           commits = subprocess.run(
               ["git", "log", "--pretty=- %s", revisions],

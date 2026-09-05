@@ -834,7 +834,10 @@ void sigchld_listener_callback() {
                 PLOGE("exec");
 
                 kill(pid, SIGKILL);
-                exit(1);
+
+                /* INFO: _exit, not exit: this fork shares the monitor's stdio
+                          buffers and atexit handlers. */
+                _exit(1);
               } else if (p == -1) {
                 PLOGE("fork");
 

@@ -71,8 +71,12 @@ static struct maps_info *parse_maps_stream(FILE *fp) {
   }
   info_array->length = 0;
 
-  char line[1024];
-  while (fgets(line, sizeof(line), fp) != NULL) {
+  /* INFO: getline instead of a fixed buffer: maps lines with long paths
+            used to be split mid-line, fail the sscanf and silently drop
+            their mapping. */
+  char *line = NULL;
+  size_t line_capacity = 0;
+  while (getline(&line, &line_capacity, fp) != -1) {
     /* INFO: strcspn leaves the content intact when the last maps line has no
               trailing newline, which strlen - 1 would corrupt. */
     line[strcspn(line, "\n")] = '\0';
@@ -132,6 +136,8 @@ static struct maps_info *parse_maps_stream(FILE *fp) {
     cleanup_maps_and_path:
       free(path_str);
     cleanup_maps:
+      free(line);
+
       for (size_t i = 0; i < info_array->length; i++) {
         free(info_array->maps[i].path);
       }
@@ -140,6 +146,8 @@ static struct maps_info *parse_maps_stream(FILE *fp) {
 
       return NULL;
   }
+
+  free(line);
 
   if (info_array->length == 0) {
     LOGE("Failed to find any maps");

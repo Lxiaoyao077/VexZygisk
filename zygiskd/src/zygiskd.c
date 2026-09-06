@@ -948,8 +948,8 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
     struct zn_cached_module *cached = zn_parse_cache_get(entry_name, module_dir, zn_file);
     if (cached == NULL || !cached->valid) continue;
 
-    for (size_t i = 0; i < cached->lines_len; i++) {
-      struct zn_cached_line *line = &cached->lines[i];
+    for (size_t row = 0; row < cached->lines_len; row++) {
+      struct zn_cached_line *line = &cached->lines[row];
 
       if (!zn_matches_target(line->target, line->is_name, process_name, process_path)) continue;
 

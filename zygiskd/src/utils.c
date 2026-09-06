@@ -331,6 +331,10 @@ static bool staged_same_file(const struct stat *a, const struct stat *b) {
 /* INFO: Fills a fresh memfd with the contents of file_fd, optionally
          sealing it. Returns -1 when the staging or the seal fails. */
 static int stage_library_bytes(int file_fd, const char *restrict path, bool seal) {
+  /* INFO: path names the failures; under NDEBUG the logs vanish and the
+            parameter would read as unused. */
+  (void) path;
+
   int mem_fd = (int)syscall(__NR_memfd_create, "zn-module",
                             MFD_CLOEXEC | (seal ? MFD_ALLOW_SEALING : 0));
   if (mem_fd == -1) return -1;
@@ -788,6 +792,9 @@ bool umount_root(void) {
   }
 
   const char *source_name = kRootSources[0];
+
+  /* INFO: Only the logs read it; keep the variable for debug builds. */
+  (void) source_name;
 
   LOGI("[%s] Unmounting root", source_name);
 

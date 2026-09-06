@@ -80,7 +80,10 @@ int unix_listener_from_path(const char *path);
 ssize_t write_fd(int fd, int sendfd);
 int read_fd(int fd);
 
-int create_library_fd(const char *restrict path);
+/* INFO: *shared reports ownership: true means the fd is a daemon-cached,
+         sealed copy that later requests reuse (never close it); false means
+         a per-call copy the caller closes right after the handover. */
+int create_library_fd(const char *restrict path, bool *shared);
 
 ssize_t write_loop(int fd, const void *restrict buf, size_t count);
 ssize_t read_loop(int fd, void *restrict buf, size_t count);

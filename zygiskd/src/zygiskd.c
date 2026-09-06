@@ -62,6 +62,7 @@ struct ZnModuleFile {
   char *lib_path;
   bool companion;
   int fd;
+  bool owned;  /* INFO: false when fd is a daemon-cached shared memfd. */
 };
 
 /* INFO: One live Zygisk Next companion process, kept for the daemon's
@@ -203,6 +204,10 @@ static bool add_zn_module(struct Context *restrict context, const char *name) {
 /* INFO: Declared here because load_modules bails out through it, and it is
          defined further down where the rest of the context handling lives. */
 static void free_modules(struct Context *restrict context);
+
+/* INFO: Same story: the Zygisk Next parse cache lives with the request
+         handlers further down, and free_modules drops it on every reload. */
+static void zn_parse_cache_clear(void);
 
 static void load_modules(struct Context *restrict context) {
   context->len = 0;
@@ -362,12 +367,18 @@ static void free_modules(struct Context *restrict context) {
   context->zn_len = 0;
 
   free_zn_companions(context);
+
+  /* INFO: The parse cache is stat-validated anyway; dropping it here (module
+            reload, daemon exit) just keeps the resident set honest. */
+  zn_parse_cache_clear();
 }
 
 static void free_zn_module_files(struct ZnModuleFile *files, size_t len) {
   for (size_t i = 0; i < len; i++) {
     free(files[i].lib_path);
-    if (files[i].fd >= 0) close(files[i].fd);
+    /* INFO: Shared memfds belong to the staging cache and outlive this
+              request on purpose; only per-call copies are ours to close. */
+    if (files[i].owned && files[i].fd >= 0) close(files[i].fd);
   }
 
   free(files);
@@ -646,7 +657,8 @@ static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_pa
     return -1;
   }
 
-  int lib_fd = create_library_fd(lib_path);
+  bool shared = false;
+  int lib_fd = create_library_fd(lib_path, &shared);
   if (lib_fd == -1) {
     LOGE("Failed handing over \"%s\"", lib_path);
 
@@ -658,13 +670,14 @@ static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_pa
   if (write_fd(daemon_fd, lib_fd) == -1) {
     LOGE("Failed sending the Zygisk Next library fd.");
 
-    close(lib_fd);
+    if (!shared) close(lib_fd);
+
     close(daemon_fd);
 
     return -1;
   }
 
-  close(lib_fd);
+  if (!shared) close(lib_fd);
 
   uint8_t response = 0;
   if (read_uint8_t(daemon_fd, &response) <= 0) {
@@ -690,6 +703,150 @@ static int spawn_zn_companion(char *restrict argv[], const char *restrict lib_pa
    process. The daemon opens the files itself because a non-root target cannot
    read /data/adb/modules, which is the whole point of handing them over as
    file descriptors. */
+/* INFO: Parsed zn_modules.txt of one module directory, cached because
+         collect_zn_modules walks every module for every fork. Re-parsed when
+         the file's stat identity changes, which is how a module update takes
+         effect; the disable marker stays a per-request check, which is what
+         makes toggling a module work without a daemon restart. */
+struct zn_cached_line {
+  bool is_name;
+  bool companion;
+  char *target;
+  char *lib_path;
+};
+
+struct zn_cached_module {
+  char *dir_name;
+  struct stat st;
+  bool valid;
+
+  struct zn_cached_line *lines;
+  size_t lines_len;
+};
+
+static struct zn_cached_module *zn_parse_cache;
+static size_t zn_parse_cache_len;
+
+static void zn_parse_cache_free_lines(struct zn_cached_module *module) {
+  for (size_t i = 0; i < module->lines_len; i++) {
+    free(module->lines[i].target);
+    free(module->lines[i].lib_path);
+  }
+
+  free(module->lines);
+  module->lines = NULL;
+  module->lines_len = 0;
+  module->valid = false;
+}
+
+static void zn_parse_cache_clear(void) {
+  for (size_t i = 0; i < zn_parse_cache_len; i++) {
+    zn_parse_cache_free_lines(&zn_parse_cache[i]);
+    free(zn_parse_cache[i].dir_name);
+  }
+
+  free(zn_parse_cache);
+  zn_parse_cache = NULL;
+  zn_parse_cache_len = 0;
+}
+
+static bool zn_parse_cache_same_file(const struct stat *a, const struct stat *b) {
+  return a->st_dev == b->st_dev &&
+         a->st_ino == b->st_ino &&
+         a->st_size == b->st_size &&
+         a->st_mtime == b->st_mtime;
+}
+
+static struct zn_cached_module *zn_parse_cache_get(const char *dir_name, const char *module_dir, const char *zn_file) {
+  struct zn_cached_module *module = NULL;
+
+  for (size_t i = 0; i < zn_parse_cache_len; i++) {
+    if (strcmp(zn_parse_cache[i].dir_name, dir_name) == 0) {
+      module = &zn_parse_cache[i];
+
+      break;
+    }
+  }
+
+  if (module == NULL) {
+    struct zn_cached_module *tmp = realloc(zn_parse_cache, (zn_parse_cache_len + 1) * sizeof(struct zn_cached_module));
+    if (tmp == NULL) {
+      LOGE("Failed growing the Zygisk Next parse cache");
+
+      return NULL;
+    }
+
+    zn_parse_cache = tmp;
+    module = &zn_parse_cache[zn_parse_cache_len];
+    memset(module, 0, sizeof(*module));
+
+    module->dir_name = strdup(dir_name);
+    if (module->dir_name == NULL) return NULL;
+
+    zn_parse_cache_len++;
+  }
+
+  struct stat st;
+  if (stat(zn_file, &st) == -1) {
+    if (module->valid) {
+      LOGI("The Zygisk Next list of \"%s\" disappeared", dir_name);
+
+      zn_parse_cache_free_lines(module);
+    }
+
+    return NULL;
+  }
+
+  if (module->valid && zn_parse_cache_same_file(&module->st, &st)) return module;
+
+  /* INFO: New or changed file: drop the old rows and parse afresh. */
+  zn_parse_cache_free_lines(module);
+
+  FILE *fp = fopen(zn_file, "re");
+  if (fp == NULL) return NULL;
+
+  char *line = NULL;
+  size_t line_capacity = 0;
+  ssize_t length;
+
+  while ((length = getline(&line, &line_capacity, fp)) > 0) {
+    while (length > 0 && isspace((unsigned char)line[length - 1])) line[--length] = '\0';
+    if (length == 0) continue;
+
+    bool is_name = false;
+    bool companion = false;
+    char *target = NULL;
+    char *lib_path = NULL;
+
+    if (!parse_zn_line(module_dir, line, &is_name, &target, &companion, &lib_path)) continue;
+
+    struct zn_cached_line *tmp = realloc(module->lines, (module->lines_len + 1) * sizeof(struct zn_cached_line));
+    if (tmp == NULL) {
+      LOGE("Failed growing the parsed rows of \"%s\"", dir_name);
+
+      free(target);
+      free(lib_path);
+
+      break;
+    }
+
+    module->lines = tmp;
+    module->lines[module->lines_len].is_name = is_name;
+    module->lines[module->lines_len].companion = companion;
+    module->lines[module->lines_len].target = target;
+    module->lines[module->lines_len].lib_path = lib_path;
+    module->lines_len++;
+  }
+
+  free(line);
+  fclose(fp);
+
+  module->st = st;
+  module->valid = true;
+
+  return module;
+}
+
 static bool collect_zn_modules(const char *process_name, const char *process_path, struct ZnModuleFile **out, size_t *out_len) {
   *out = NULL;
   *out_len = 0;
@@ -721,39 +878,18 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 
     if (access(zn_file, R_OK) != 0) continue;
 
-    FILE *fp = fopen(zn_file, "re");
-    if (fp == NULL) continue;
+    struct zn_cached_module *cached = zn_parse_cache_get(entry->d_name, module_dir, zn_file);
+    if (cached == NULL || !cached->valid) continue;
 
-    char *line = NULL;
-    size_t line_capacity = 0;
-    ssize_t length;
+    for (size_t i = 0; i < cached->lines_len; i++) {
+      struct zn_cached_line *line = &cached->lines[i];
 
-    while ((length = getline(&line, &line_capacity, fp)) > 0) {
-      while (length > 0 && isspace((unsigned char)line[length - 1])) line[--length] = '\0';
-      if (length == 0) continue;
+      if (!zn_matches_target(line->target, line->is_name, process_name, process_path)) continue;
 
-      bool is_name = false;
-      bool companion = false;
-      char *target = NULL;
-      char *lib_path = NULL;
-
-      if (!parse_zn_line(module_dir, line, &is_name, &target, &companion, &lib_path)) continue;
-
-      bool matched = zn_matches_target(target, is_name, process_name, process_path);
-
-      free(target);
-
-      if (!matched) {
-        free(lib_path);
-
-        continue;
-      }
-
-      int fd = create_library_fd(lib_path);
+      bool shared = false;
+      int fd = create_library_fd(line->lib_path, &shared);
       if (fd == -1) {
-        LOGE("Failed handing over the Zygisk Next library \"%s\"", lib_path);
-
-        free(lib_path);
+        LOGE("Failed handing over the Zygisk Next library \"%s\"", line->lib_path);
 
         continue;
       }
@@ -765,8 +901,7 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
         if (tmp == NULL) {
           LOGE("Failed growing the Zygisk Next module list");
 
-          close(fd);
-          free(lib_path);
+          if (!shared) close(fd);
 
           break;
         }
@@ -775,14 +910,21 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
         capacity = new_capacity;
       }
 
-      (*out)[*out_len].lib_path = lib_path;
-      (*out)[*out_len].companion = companion;
+      char *lib_path_copy = strdup(line->lib_path);
+      if (lib_path_copy == NULL) {
+        LOGE("Failed copying the Zygisk Next library path \"%s\"", line->lib_path);
+
+        if (!shared) close(fd);
+
+        continue;
+      }
+
+      (*out)[*out_len].lib_path = lib_path_copy;
+      (*out)[*out_len].companion = line->companion;
       (*out)[*out_len].fd = fd;
+      (*out)[*out_len].owned = !shared;
       (*out_len)++;
     }
-
-    free(line);
-    fclose(fp);
   }
 
   closedir(dir);

@@ -282,30 +282,53 @@ int read_fd(int fd) {
   #define MFD_CLOEXEC 0x0001U
 #endif
 
-/* INFO: Hands a library over as a memfd instead of a descriptor of the file
-         itself, which is what lets an unprivileged target load it at all.
+/* INFO: Sharing a staged memfd is only safe once nobody can rewrite it:
+         F_ADD_SEALS (Linux 3.17+) makes the pages immutable for every
+         holder, so a receiver cannot map it writable and poison the loads
+         of the processes that come after it. Guarded so the file builds
+         against older headers too. */
+#ifndef MFD_ALLOW_SEALING
+  #define MFD_ALLOW_SEALING 0x0008U
+#endif
+#ifndef F_ADD_SEALS
+  #define F_ADD_SEALS 1033
+#endif
+#ifndef F_SEAL_SHRINK
+  #define F_SEAL_SHRINK 0x0002U
+  #define F_SEAL_GROW 0x0004U
+  #define F_SEAL_WRITE 0x0008U
+#endif
 
-         Reopening /proc/self/fd skips the permissions of every directory
-         leading to the file, /data/adb among them, but the file then still
-         carries its own mode and its SELinux label, and a target that is not
-         root is usually allowed to touch neither. A memfd is created here, so
-         it is owned by this daemon and labelled after its domain. */
-int create_library_fd(const char *restrict path) {
-  int file_fd = open(path, O_RDONLY | O_CLOEXEC);
-  if (file_fd == -1) {
-    LOGE("Failed opening \"%s\": %s", path, strerror(errno));
+/* INFO: One staged library: an immutable memfd copy keyed by the source
+         file's identity. ReadZnModules resolves matching modules for every
+         fork, and restaging a multi-megabyte library each time is the most
+         expensive thing the daemon does on that path; with the seal in
+         place the same memfd is handed out repeatedly at descriptor-dup
+         cost. Entries live for the daemon's lifetime; a module update
+         lands on a new identity and is restaged over its slot. */
+struct staged_library {
+  char *path;
+  struct stat st;
+  int mem_fd;
+};
 
-    return -1;
-  }
+#define STAGED_LIBRARY_MAX 16
 
-  int mem_fd = (int)syscall(__NR_memfd_create, "zn-module", MFD_CLOEXEC);
-  if (mem_fd == -1) {
-    LOGE("Failed creating a memfd: %s", strerror(errno));
+static struct staged_library staged_libraries[STAGED_LIBRARY_MAX];
 
-    close(file_fd);
+static bool staged_same_file(const struct stat *a, const struct stat *b) {
+  return a->st_dev == b->st_dev &&
+         a->st_ino == b->st_ino &&
+         a->st_size == b->st_size &&
+         a->st_mtime == b->st_mtime;
+}
 
-    return -1;
-  }
+/* INFO: Fills a fresh memfd with the contents of file_fd, optionally
+         sealing it. Returns -1 when the staging or the seal fails. */
+static int stage_library_bytes(int file_fd, const char *restrict path, bool seal) {
+  int mem_fd = (int)syscall(__NR_memfd_create, "zn-module",
+                            MFD_CLOEXEC | (seal ? MFD_ALLOW_SEALING : 0));
+  if (mem_fd == -1) return -1;
 
   /* INFO: sendfile moves the bytes inside the kernel — the source is a
             regular file and the memfd a tmpfs one — which halves the syscall
@@ -358,12 +381,111 @@ int create_library_fd(const char *restrict path) {
     }
   }
 
-  close(file_fd);
-
   if (!copied) {
     close(mem_fd);
 
     return -1;
+  }
+
+  if (seal && fcntl(mem_fd, F_ADD_SEALS, F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_WRITE) == -1) {
+    LOGD("Sealing unavailable on this kernel, staging per call: %s", strerror(errno));
+
+    close(mem_fd);
+
+    return -1;
+  }
+
+  return mem_fd;
+}
+
+/* INFO: Hands a library over as a memfd instead of a descriptor of the file
+         itself, which is what lets an unprivileged target load it at all.
+
+         Reopening /proc/self/fd skips the permissions of every directory
+         leading to the file, /data/adb among them, but the file then still
+         carries its own mode and its SELinux label, and a target that is not
+         root is usually allowed to touch neither. A memfd is created here, so
+         it is owned by this daemon and labelled after its domain.
+
+         On success *shared says who owns the descriptor: true means it is a
+         daemon-cached, sealed copy that later requests reuse and the caller
+         must not close; false means a per-call copy (kernels without
+         sealing, or every slot taken) that the caller closes right after the
+         handover. */
+int create_library_fd(const char *restrict path, bool *shared) {
+  *shared = false;
+
+  struct stat st;
+  if (stat(path, &st) == -1) {
+    LOGE("Failed stating \"%s\": %s", path, strerror(errno));
+
+    return -1;
+  }
+
+  struct staged_library *free_slot = NULL;
+
+  for (size_t i = 0; i < STAGED_LIBRARY_MAX; i++) {
+    struct staged_library *slot = &staged_libraries[i];
+
+    if (slot->path == NULL) {
+      if (free_slot == NULL) free_slot = slot;
+
+      continue;
+    }
+
+    if (strcmp(slot->path, path) != 0) continue;
+
+    if (staged_same_file(&slot->st, &st)) {
+      *shared = true;
+
+      return slot->mem_fd;
+    }
+
+    /* INFO: The module was updated: drop the stale copy and restage. */
+    close(slot->mem_fd);
+    free(slot->path);
+    slot->path = NULL;
+    slot->mem_fd = -1;
+
+    if (free_slot == NULL) free_slot = slot;
+
+    break;
+  }
+
+  int file_fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (file_fd == -1) {
+    LOGE("Failed opening \"%s\": %s", path, strerror(errno));
+
+    return -1;
+  }
+
+  int mem_fd = stage_library_bytes(file_fd, path, true);
+  close(file_fd);
+
+  if (mem_fd == -1) {
+    /* INFO: Without sealing a shared memfd could be remapped writable by
+              whoever receives it and poison every later loader, so kernels
+              without sealing keep the pre-cache behaviour: a fresh per-call
+              copy the caller closes after the handover. */
+    file_fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (file_fd == -1) return -1;
+
+    mem_fd = stage_library_bytes(file_fd, path, false);
+    close(file_fd);
+
+    return mem_fd;
+  }
+
+  if (free_slot != NULL) {
+    free_slot->path = strdup(path);
+
+    if (free_slot->path != NULL) {
+      free_slot->st = st;
+      free_slot->mem_fd = mem_fd;
+      *shared = true;
+    }
+    /* INFO: Out of memory for the bookkeeping: the sealed copy is still
+              handed out, just untracked and closed by the caller. */
   }
 
   return mem_fd;

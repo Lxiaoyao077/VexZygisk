@@ -392,9 +392,10 @@ static int stage_library_bytes(int file_fd, const char *restrict path, bool seal
     return -1;
   }
 
+  /* INFO: No log on seal failure on purpose: on a kernel without sealing
+            this fires for every staged library, and the INFO comment above
+            already documents the per-call fallback. */
   if (seal && fcntl(mem_fd, F_ADD_SEALS, F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_WRITE) == -1) {
-    LOGD("Sealing unavailable on this kernel, staging per call: %s", strerror(errno));
-
     close(mem_fd);
 
     return -1;

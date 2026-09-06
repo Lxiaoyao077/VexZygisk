@@ -136,6 +136,12 @@ static size_t jni_hook_list_count = 0;
 struct rezygisk_module *zygisk_modules = NULL;
 size_t zygisk_module_length = 0;
 
+/* INFO: The daemon reports whether any Zygisk Next module exists at all in
+           the GetProcessFlags answer; until the first answer arrives the
+           state is unknown and the per-fork query still runs. */
+static bool zn_presence_known = false;
+static bool zn_modules_present = false;
+
 static bool should_unmap_zygisk = false;
 static bool enable_unloader = false;
 
@@ -1108,6 +1114,16 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
   }
 
   ctx->info_flags = rezygiskd_get_process_flags(uid, ctx->process);
+
+  /* INFO: Whether any Zygisk Next module exists is a daemon-wide fact, so
+            the first flags answer is remembered and every later fork skips
+            the ReadZnModules round trip when there is nothing to resolve.
+            Unknown until an answer arrives (system_server is typically the
+            very first fork), in which case the query still runs. */
+  if (!zn_presence_known) {
+    zn_modules_present = (ctx->info_flags & PROCESS_ZN_PRESENT) == PROCESS_ZN_PRESENT;
+    zn_presence_known = true;
+  }
   /* INFO: To ensure we are really using a clean mount namespace, we use
               the first process it as reference for clean mount namespace,
               before it even does something, so that it will be clean yet
@@ -1192,7 +1208,7 @@ static void rz_nativeSpecializeAppProcess_pre(struct zygisk_context *ctx) {
   FLAG_SET(ctx, SKIP_FD_SANITIZATION);
   rz_app_specialize_pre(ctx);
 
-  zn_load_modules_for_process(ctx->process);
+  if (!zn_presence_known || zn_modules_present) zn_load_modules_for_process(ctx->process);
 }
 
 static void rz_nativeSpecializeAppProcess_post(struct zygisk_context *ctx) {
@@ -1213,7 +1229,7 @@ static void rz_nativeForkSystemServer_pre(struct zygisk_context *ctx) {
 
   /* INFO: Served after the fd sanitizer so the memfd and companion sockets
              the load opens are not treated as leaked fds and closed. */
-  zn_load_modules_for_process("system_server");
+  if (!zn_presence_known || zn_modules_present) zn_load_modules_for_process("system_server");
 }
 
 static void rz_nativeForkSystemServer_post(struct zygisk_context *ctx) {
@@ -1253,7 +1269,7 @@ static void rz_nativeForkAndSpecialize_pre(struct zygisk_context *ctx) {
              the system server path, and after the mount namespace switch so
              the daemon's handover is not lost to setns. Libraries inherited
              from the zygote are skipped inside the loader. */
-  zn_load_modules_for_process(ctx->process);
+  if (!zn_presence_known || zn_modules_present) zn_load_modules_for_process(ctx->process);
 }
 
 static void rz_nativeForkAndSpecialize_post(struct zygisk_context *ctx) {

@@ -13,6 +13,11 @@
          and a fixed underlying type is a C23 extension. */
 #define PROCESS_GRANTED_ROOT (1u << 0)
 #define PROCESS_ON_DENYLIST (1u << 1)
+/* INFO: Tells the loader whether any Zygisk Next module exists at all, so a
+         device without one can skip the per-fork ReadZnModules round trip
+         entirely. It is a global fact from the last module load, not
+         per-process, and never reaches modules (the loader strips it). */
+#define PROCESS_ZN_PRESENT (1u << 2)
 #define PROCESS_IS_MANAGER (1u << 27)
 #define PROCESS_ROOT_IS_APATCH (1u << 28)
 #define PROCESS_ROOT_IS_KSU (1u << 29)

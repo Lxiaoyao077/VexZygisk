@@ -1062,6 +1062,15 @@ static void handle_get_process_flags(struct Client *client) {
     }
   }
 
+  /* INFO: The Zygisk Next set only changes on a module load or reload, so
+            the load-time answer rides along for free; the loader remembers
+            it and skips its per-fork ReadZnModules when there is nothing to
+            resolve. A module installed while the daemon runs is picked up on
+            the next reload - flashing a module comes with a reboot anyway. */
+  if (client->context->zn_len > 0) {
+    flags |= PROCESS_ZN_PRESENT;
+  }
+
   flags |= PROCESS_ROOT_IS_ACTIVE;
 
   ret = write_uint32_t(client->fd, flags);

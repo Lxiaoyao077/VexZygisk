@@ -1215,15 +1215,24 @@ static void rz_app_specialize_post(struct zygisk_context *ctx) {
       package = package_buffer;
     }
 
-    const char *se_info = NULL;
+    /* INFO: The contract promises non-null strings; an OOM inside
+              GetStringUTFChars clears its pending exception and degrades to
+              an empty se_info instead of handing the module a NULL. */
+    const char *se_info = "";
+    const char *se_info_chars = NULL;
     if (ctx->args.app->se_info != NULL) {
-      se_info = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->se_info, NULL);
+      se_info_chars = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->se_info, NULL);
+      if (se_info_chars != NULL) {
+        se_info = se_info_chars;
+      } else {
+        (*ctx->env)->ExceptionClear(ctx->env);
+      }
     }
 
     zn_runtime_notify_app_specialized(ctx->process, package, se_info);
 
-    if (se_info != NULL) {
-      (*ctx->env)->ReleaseStringUTFChars(ctx->env, *ctx->args.app->se_info, se_info);
+    if (se_info_chars != NULL) {
+      (*ctx->env)->ReleaseStringUTFChars(ctx->env, *ctx->args.app->se_info, se_info_chars);
     }
   }
 

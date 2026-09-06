@@ -399,6 +399,9 @@ void zn_runtime_notify_app_specialized(const char *process_name, const char *pac
   }
 }
 
+/* INFO: The Runtime API only exists from ZN API v4 onwards, so modules built
+           against an older version are told about it instead of being served
+           a table they would never have reached. */
 static const struct ZygiskNextRuntime *zn_get_runtime_unavailable(void) {
   LOGE("The runtime API needs a module built for API 4 or newer");
 

@@ -78,34 +78,35 @@ void ksu_get_existence(struct root_impl_state *state) {
   state->state = Supported;
 }
 
-bool ksu_uid_granted_root(uid_t uid) {
-  struct ksu_uid_granted_root_cmd cmd = {
+void ksu_uid_query_root(uid_t uid, bool *granted_root, bool *should_umount) {
+  *granted_root = false;
+  *should_umount = false;
+
+  struct ksu_uid_granted_root_cmd granted_cmd = {
     .uid = uid,
     .granted = 0
   };
 
-  if (ioctl(ksu_fd, KSU_IOCTL_UID_GRANTED_ROOT, &cmd) == -1) {
+  if (ioctl(ksu_fd, KSU_IOCTL_UID_GRANTED_ROOT, &granted_cmd) == -1) {
     LOGE("Failed to ioctl KSU_IOCTL_UID_GRANTED_ROOT: %s\n", strerror(errno));
 
-    return false;
+    return;
   }
 
-  return cmd.granted;
-}
+  *granted_root = granted_cmd.granted;
 
-bool ksu_uid_should_umount(uid_t uid) {
-  struct ksu_uid_should_umount_cmd cmd = {
+  struct ksu_uid_should_umount_cmd umount_cmd = {
     .uid = uid,
     .should_umount = 0
   };
 
-  if (ioctl(ksu_fd, KSU_IOCTL_UID_SHOULD_UMOUNT, &cmd) == -1) {
+  if (ioctl(ksu_fd, KSU_IOCTL_UID_SHOULD_UMOUNT, &umount_cmd) == -1) {
     LOGE("Failed to ioctl KSU_IOCTL_UID_SHOULD_UMOUNT: %s\n", strerror(errno));
 
-    return false;
+    return;
   }
 
-  return cmd.should_umount;
+  *should_umount = umount_cmd.should_umount;
 }
 
 bool ksu_uid_is_manager(uid_t uid) {

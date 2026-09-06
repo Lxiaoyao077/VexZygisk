@@ -10,14 +10,12 @@
 #ifdef ROOT_IMPL_APATCH
   #include "apatch.h"
   #define ROOT_GET_EXISTENCE ap_get_existence
-  #define ROOT_UID_GRANTED_ROOT ap_uid_granted_root
-  #define ROOT_UID_SHOULD_UMOUNT ap_uid_should_umount
+  #define ROOT_UID_QUERY_ROOT ap_uid_query_root
   #define ROOT_UID_IS_MANAGER ap_uid_is_manager
 #else
   #include "kernelsu.h"
   #define ROOT_GET_EXISTENCE ksu_get_existence
-  #define ROOT_UID_GRANTED_ROOT ksu_uid_granted_root
-  #define ROOT_UID_SHOULD_UMOUNT ksu_uid_should_umount
+  #define ROOT_UID_QUERY_ROOT ksu_uid_query_root
   #define ROOT_UID_IS_MANAGER ksu_uid_is_manager
 #endif
 
@@ -44,16 +42,13 @@ void get_impl(struct root_impl *uimpl) {
   *uimpl = impl;
 }
 
-bool uid_granted_root(uid_t uid) {
-  if (!impl_supported) return false;
+void uid_query_root(uid_t uid, bool *granted_root, bool *should_umount) {
+  *granted_root = false;
+  *should_umount = false;
 
-  return ROOT_UID_GRANTED_ROOT(uid);
-}
+  if (!impl_supported) return;
 
-bool uid_should_umount(uid_t uid) {
-  if (!impl_supported) return false;
-
-  return ROOT_UID_SHOULD_UMOUNT(uid);
+  ROOT_UID_QUERY_ROOT(uid, granted_root, should_umount);
 }
 
 bool uid_is_manager(uid_t uid) {

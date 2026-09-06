@@ -1046,10 +1046,17 @@ static void handle_get_process_flags(struct Client *client) {
   if (uid_is_manager(uid)) {
     flags |= PROCESS_IS_MANAGER;
   } else {
-    if (uid_granted_root(uid)) {
+    /* INFO: One backend query per request: on the APatch flavour the two
+              flags used to cost a config stat each, twice per fork. */
+    bool granted_root = false;
+    bool should_umount = false;
+
+    uid_query_root(uid, &granted_root, &should_umount);
+
+    if (granted_root) {
       flags |= PROCESS_GRANTED_ROOT;
     }
-    if (uid_should_umount(uid)) {
+    if (should_umount) {
       flags |= PROCESS_ON_DENYLIST;
     }
   }

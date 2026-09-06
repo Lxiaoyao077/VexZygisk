@@ -46,9 +46,7 @@ void root_impls_setup(void);
 
 void get_impl(struct root_impl *uimpl);
 
-bool uid_granted_root(uid_t uid);
-
-bool uid_should_umount(uid_t uid);
+void uid_query_root(uid_t uid, bool *granted_root, bool *should_umount);
 
 bool uid_is_manager(uid_t uid);
 

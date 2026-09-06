@@ -227,18 +227,6 @@ static bool ap_uid_in_range(const struct ap_package_entry *entry, uid_t uid) {
   return uid >= entry->uid && uid <= entry->to_uid;
 }
 
-static bool ap_config_matches(uid_t uid, bool wanted_flag) {
-  size_t rows = 0;
-  struct ap_package_entry *entries = ap_get_config_rows(&rows);
-
-  for (size_t i = 0; i < rows; i++) {
-    bool flag = wanted_flag ? entries[i].allow : entries[i].exclude;
-    if (flag && ap_uid_in_range(&entries[i], uid)) return true;
-  }
-
-  return false;
-}
-
 void ap_get_existence(struct root_impl_state *state) {
   /* INFO: The apd binary and the package configuration are the two things the
            daemon depends on. The APatch Manager runs its own version gate at
@@ -255,12 +243,24 @@ void ap_get_existence(struct root_impl_state *state) {
   state->state = Supported;
 }
 
-bool ap_uid_granted_root(uid_t uid) {
-  return ap_config_matches(uid, true);
-}
+/* INFO: Both flags come out of one cached-rows pass: GetProcessFlags asks
+         for the pair on every fork, and ap_get_config_rows stats the config
+         once here instead of once per flag. */
+void ap_uid_query_root(uid_t uid, bool *granted_root, bool *should_umount) {
+  *granted_root = false;
+  *should_umount = false;
 
-bool ap_uid_should_umount(uid_t uid) {
-  return ap_config_matches(uid, false);
+  size_t rows = 0;
+  struct ap_package_entry *entries = ap_get_config_rows(&rows);
+
+  for (size_t i = 0; i < rows; i++) {
+    if (!ap_uid_in_range(&entries[i], uid)) continue;
+
+    if (entries[i].allow) *granted_root = true;
+    if (entries[i].exclude) *should_umount = true;
+
+    if (*granted_root && *should_umount) break;
+  }
 }
 
 /* INFO: The manager may be installed for any user profile, so both /data/user

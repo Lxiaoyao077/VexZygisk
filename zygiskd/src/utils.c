@@ -9,6 +9,7 @@
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/sendfile.h>
 #include <sys/sysmacros.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -306,27 +307,52 @@ int create_library_fd(const char *restrict path) {
     return -1;
   }
 
-  char buffer[65536];
+  /* INFO: sendfile moves the bytes inside the kernel — the source is a
+            regular file and the memfd a tmpfs one — which halves the syscall
+            count for multi-megabyte libraries; the byte loop stays as the
+            fallback for filesystem pairs that refuse it, restarting the copy
+            from scratch since sendfile may have moved part of the file. */
   bool copied = true;
+  off_t offset = 0;
 
   for (;;) {
-    ssize_t got = read(file_fd, buffer, sizeof(buffer));
-    if (got == -1) {
+    ssize_t sent = sendfile(mem_fd, file_fd, &offset, 1 << 20);
+
+    if (sent == 0) break;
+
+    if (sent < 0) {
       if (errno == EINTR) continue;
 
-      LOGE("Failed reading \"%s\": %s", path, strerror(errno));
+      if (ftruncate(mem_fd, 0) == -1 || lseek(mem_fd, 0, SEEK_SET) == -1) {
+        copied = false;
 
-      copied = false;
+        break;
+      }
 
-      break;
-    }
+      char buffer[65536];
 
-    if (got == 0) break;
+      for (;;) {
+        ssize_t got = read(file_fd, buffer, sizeof(buffer));
+        if (got == -1) {
+          if (errno == EINTR) continue;
 
-    if (write_loop(mem_fd, buffer, (size_t)got) != got) {
-      LOGE("Failed filling the memfd of \"%s\"", path);
+          LOGE("Failed reading \"%s\": %s", path, strerror(errno));
 
-      copied = false;
+          copied = false;
+
+          break;
+        }
+
+        if (got == 0) break;
+
+        if (write_loop(mem_fd, buffer, (size_t)got) != got) {
+          LOGE("Failed filling the memfd of \"%s\"", path);
+
+          copied = false;
+
+          break;
+        }
+      }
 
       break;
     }

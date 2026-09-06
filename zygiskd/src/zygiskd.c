@@ -728,6 +728,21 @@ struct zn_cached_module {
 static struct zn_cached_module *zn_parse_cache;
 static size_t zn_parse_cache_len;
 
+/* INFO: The /data/adb/modules listing, cached against the directory's stat
+         identity: entries appear or disappear through the directory itself,
+         so its mtime covers module installs and removals. Everything inside
+         a module directory (disable marker, zn_modules.txt identity) stays a
+         per-request check on purpose. */
+struct zn_dir_entry {
+  char *name;
+  unsigned char d_type;
+};
+
+static struct zn_dir_entry *zn_dir_cache;
+static size_t zn_dir_cache_len;
+static struct stat zn_dir_st;
+static bool zn_dir_valid;
+
 static void zn_parse_cache_free_lines(struct zn_cached_module *module) {
   for (size_t i = 0; i < module->lines_len; i++) {
     free(module->lines[i].target);
@@ -749,9 +764,18 @@ static void zn_parse_cache_clear(void) {
   free(zn_parse_cache);
   zn_parse_cache = NULL;
   zn_parse_cache_len = 0;
+
+  for (size_t i = 0; i < zn_dir_cache_len; i++) {
+    free(zn_dir_cache[i].name);
+  }
+
+  free(zn_dir_cache);
+  zn_dir_cache = NULL;
+  zn_dir_cache_len = 0;
+  zn_dir_valid = false;
 }
 
-static bool zn_parse_cache_same_file(const struct stat *a, const struct stat *b) {
+static bool zn_same_file(const struct stat *a, const struct stat *b) {
   return a->st_dev == b->st_dev &&
          a->st_ino == b->st_ino &&
          a->st_size == b->st_size &&
@@ -798,7 +822,7 @@ static struct zn_cached_module *zn_parse_cache_get(const char *dir_name, const c
     return NULL;
   }
 
-  if (module->valid && zn_parse_cache_same_file(&module->st, &st)) return module;
+  if (module->valid && zn_same_file(&module->st, &st)) return module;
 
   /* INFO: New or changed file: drop the old rows and parse afresh. */
   zn_parse_cache_free_lines(module);
@@ -854,20 +878,61 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 
   size_t capacity = 0;
 
-  DIR *dir = opendir(ZYGISK_MODULES_DIR);
-  if (dir == NULL) {
-    LOGE("Failed opening %s: %s", ZYGISK_MODULES_DIR, strerror(errno));
+  struct stat dir_st;
+  if (stat(ZYGISK_MODULES_DIR, &dir_st) == -1) {
+    LOGE("Failed stating %s: %s", ZYGISK_MODULES_DIR, strerror(errno));
 
     return false;
   }
 
-  struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 || strcmp(entry->d_name, "rezygisk") == 0) continue;
+  if (zn_dir_valid && zn_same_file(&dir_st, &zn_dir_st)) {
+    zn_dir_valid = true;  /* INFO: nothing to rebuild, keep the listing. */
+  } else {
+    for (size_t i = 0; i < zn_dir_cache_len; i++) {
+      free(zn_dir_cache[i].name);
+    }
+
+    zn_dir_cache_len = 0;
+
+    DIR *dir = opendir(ZYGISK_MODULES_DIR);
+    if (dir == NULL) {
+      LOGE("Failed opening %s: %s", ZYGISK_MODULES_DIR, strerror(errno));
+
+      zn_dir_valid = false;
+
+      return false;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+      if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
+      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 || strcmp(entry->d_name, "rezygisk") == 0) continue;
+
+      struct zn_dir_entry *tmp = realloc(zn_dir_cache, (zn_dir_cache_len + 1) * sizeof(struct zn_dir_entry));
+      if (tmp == NULL) {
+        LOGE("Failed growing the module directory listing");
+
+        break;
+      }
+
+      zn_dir_cache = tmp;
+      zn_dir_cache[zn_dir_cache_len].name = strdup(entry->d_name);
+      if (zn_dir_cache[zn_dir_cache_len].name == NULL) break;
+
+      zn_dir_cache[zn_dir_cache_len].d_type = entry->d_type;
+      zn_dir_cache_len++;
+    }
+
+    closedir(dir);
+    zn_dir_st = dir_st;
+    zn_dir_valid = true;
+  }
+
+  for (size_t i = 0; i < zn_dir_cache_len; i++) {
+    const char *entry_name = zn_dir_cache[i].name;
 
     char module_dir[PATH_MAX];
-    snprintf(module_dir, PATH_MAX, "%s/%s", ZYGISK_MODULES_DIR, entry->d_name);
+    snprintf(module_dir, PATH_MAX, "%s/%s", ZYGISK_MODULES_DIR, entry_name);
 
     char disabled[PATH_MAX];
     snprintf(disabled, PATH_MAX, "%s/disable", module_dir);
@@ -877,9 +942,10 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
     char zn_file[PATH_MAX];
     snprintf(zn_file, PATH_MAX, "%s/zn_modules.txt", module_dir);
 
-    if (access(zn_file, R_OK) != 0) continue;
-
-    struct zn_cached_module *cached = zn_parse_cache_get(entry->d_name, module_dir, zn_file);
+    /* INFO: No access() probe here: zn_parse_cache_get stats the file and
+              fopen fails the same way when it exists but is unreadable, so
+              the extra syscall per module per fork bought nothing. */
+    struct zn_cached_module *cached = zn_parse_cache_get(entry_name, module_dir, zn_file);
     if (cached == NULL || !cached->valid) continue;
 
     for (size_t i = 0; i < cached->lines_len; i++) {
@@ -927,8 +993,6 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
       (*out_len)++;
     }
   }
-
-  closedir(dir);
 
   return true;
 }

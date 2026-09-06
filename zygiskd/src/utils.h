@@ -21,35 +21,38 @@
   #define LOG_TAG "zygiskd" LP_SELECT("32", "64")
 #endif
 
-#define LOGI(...)                                              \
-  do {                                                         \
-    __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); \
-    printf(__VA_ARGS__);                                       \
-  } while (0)
-
-#define LOGW(...)                                                \
-  do {                                                           \
-    __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__);   \
-    printf(__VA_ARGS__);                                         \
-  } while (0)
-
-#define LOGE(...)                                                \
-  do {                                                           \
-    __android_log_print(ANDROID_LOG_ERROR , LOG_TAG, __VA_ARGS__); \
-    printf(__VA_ARGS__);                                         \
-  } while (0)
-
-/* INFO: Per-request traces live behind NDEBUG, mirroring the loader: debug
-         packages keep them for troubleshooting, release compiles them —
-         and their logd/printf writes — away entirely. */
-#ifndef NDEBUG
+/* INFO: Release builds are completely silent: every log level, and the
+         logd/printf writes each one costs, compiles away under NDEBUG.
+         Debug packages keep the full output for troubleshooting. */
+#ifdef NDEBUG
+  #define LOGD(...) do { } while (0)
+  #define LOGI(...) do { } while (0)
+  #define LOGW(...) do { } while (0)
+  #define LOGE(...) do { } while (0)
+#else
   #define LOGD(...)                                              \
     do {                                                         \
       __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__); \
       printf(__VA_ARGS__);                                       \
     } while (0)
-#else
-  #define LOGD(...) do { } while (0)
+
+  #define LOGI(...)                                              \
+    do {                                                         \
+      __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); \
+      printf(__VA_ARGS__);                                       \
+    } while (0)
+
+  #define LOGW(...)                                              \
+    do {                                                         \
+      __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__); \
+      printf(__VA_ARGS__);                                       \
+    } while (0)
+
+  #define LOGE(...)                                              \
+    do {                                                         \
+      __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__); \
+      printf(__VA_ARGS__);                                       \
+    } while (0)
 #endif
 
 /* INFO: Fixed-argument on purpose. A variadic PLOGE("read") would pass an

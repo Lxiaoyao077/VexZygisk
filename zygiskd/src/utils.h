@@ -39,6 +39,19 @@
     printf(__VA_ARGS__);                                         \
   } while (0)
 
+/* INFO: Per-request traces live behind NDEBUG, mirroring the loader: debug
+         packages keep them for troubleshooting, release compiles them —
+         and their logd/printf writes — away entirely. */
+#ifndef NDEBUG
+  #define LOGD(...)                                              \
+    do {                                                         \
+      __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__); \
+      printf(__VA_ARGS__);                                       \
+    } while (0)
+#else
+  #define LOGD(...) do { } while (0)
+#endif
+
 /* INFO: Fixed-argument on purpose. A variadic PLOGE("read") would pass an
          empty __VA_ARGS__, which -Wpedantic rejects as ISO C99 requires at
          least one argument for "...". */

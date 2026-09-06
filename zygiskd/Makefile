@@ -9,7 +9,7 @@ OBJ_DIR = $(OBJ_ROOT)/$(ARCH)
 ZKSU_VERSION ?= $(VER_NAME)
 
 ifeq ($(BUILD_TYPE),release)
-	TYPE_CFLAGS = -O3 -flto
+	TYPE_CFLAGS = -O3 -flto -DNDEBUG
 	TYPE_LDFLAGS = -Wl,--strip-all -flto
 else
 	TYPE_CFLAGS = -g -O0 -DDEBUG

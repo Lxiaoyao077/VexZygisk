@@ -31,6 +31,11 @@
   #define CMD_DAEMON_SET_ERROR_INFO DAEMON32_SET_ERROR_INFO
 #endif
 
+/* INFO: HyperOS's app spawner, the third process (besides the two zygotes)
+         that forks application processes. Both ABI monitors match it, each
+         injecting its own bitness into its own bitness spawner. */
+#define HYOS_SPAWNER_NAME "/system_ext/bin/hyos_spawner"
+
 static bool update_status(const char *message);
 
 static const char *monitor_stop_reason = NULL;
@@ -763,6 +768,14 @@ void sigchld_listener_callback() {
               is_tango = true;
             }
 #endif
+            else if (strcmp(program, HYOS_SPAWNER_NAME) == 0) {
+              /* INFO: HyperOS forks apps from /system_ext/bin/hyos_spawner
+                        instead of the classic zygote, so it is a spawner
+                        exactly like the zygote for this pipeline and gets
+                        the same injection. Its restarts count against the
+                        same crash breaker. */
+              tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
+            }
 
             if (tracer == NULL) break;
 

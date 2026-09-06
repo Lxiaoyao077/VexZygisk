@@ -458,8 +458,12 @@ static bool parse_zn_line(const char *module_dir, const char *line, bool *is_nam
 
 static bool zn_matches_target(const char *target, bool is_name, const char *process_name, const char *process_path) {
   if (is_name) {
-    if (strcmp(target, "zygote") == 0 || strcmp(target, "zygote64") == 0 || strcmp(target, "zygote32") == 0)
-      return strstr(process_name, "zygote") != NULL || strstr(process_name, "app_process") != NULL;
+    /* INFO: hyos_spawner is a zygote-class process on HyperOS; mirrored
+              exactly by the loader's fallback matcher in zn_loader.c. */
+    if (strcmp(target, "zygote") == 0 || strcmp(target, "zygote64") == 0 || strcmp(target, "zygote32") == 0 ||
+        strcmp(target, "hyos_spawner") == 0)
+      return strstr(process_name, "zygote") != NULL || strstr(process_name, "app_process") != NULL ||
+             strstr(process_name, "hyos_spawner") != NULL;
 
     return strcmp(process_name, target) == 0;
   }

@@ -263,8 +263,13 @@ static bool parse_line(const char *module_dir, const char *line, struct zn_entry
 
 static bool matches_process(const struct zn_entry *entry, const char *process_path, const char *process_name) {
   if (entry->is_name) {
-    if (strcmp(entry->target, "zygote") == 0 || strcmp(entry->target, "zygote64") == 0 || strcmp(entry->target, "zygote32") == 0)
-      return strstr(process_name, "zygote") != NULL || strstr(process_name, "app_process") != NULL;
+    /* INFO: hyos_spawner is a zygote-class process: modules targeting any
+              zygote name load there too, so a HyperOS device resolves the
+              same set no matter which spawner forks the app. */
+    if (strcmp(entry->target, "zygote") == 0 || strcmp(entry->target, "zygote64") == 0 || strcmp(entry->target, "zygote32") == 0 ||
+        strcmp(entry->target, "hyos_spawner") == 0)
+      return strstr(process_name, "zygote") != NULL || strstr(process_name, "app_process") != NULL ||
+             strstr(process_name, "hyos_spawner") != NULL;
 
     return strcmp(process_name, entry->target) == 0;
   }

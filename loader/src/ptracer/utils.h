@@ -76,7 +76,9 @@ bool wait_for_ptrace_syscall_stop(int pid, int *status);
 
 long remote_syscall(int pid, struct user_regs_struct *regs, uintptr_t syscall_gadget, long sysnr, long *args, size_t args_size);
 
-void tracee_skip_syscall(int pid);
+/* INFO: Returns false when the tracee's registers could not be rewritten;
+          the caller must not continue the trapped syscall in that case. */
+bool tracee_skip_syscall(int pid);
 
 void wait_for_trace(int pid, int *status, int flags);
 

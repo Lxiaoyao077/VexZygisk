@@ -103,21 +103,14 @@ $(MODULE_DONE): $(LOADER_DONE) $(ZYGISKD_DONE) $(MODULE_INPUTS)
 	    $(MODULE_PROP_SRC) > $(MODULE_OUT)/module.prop
 
 	@echo "Customizing scripts..."
-	@sed \
-	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'                   \
-	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g'                 \
-	    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g'             \
-	    module/src/post-fs-data.sh > $(MODULE_OUT)/post-fs-data.sh
-	@sed \
-	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'                   \
-	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g'                 \
-	    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g'             \
-	    $(UNINSTALL_SRC) > $(MODULE_OUT)/uninstall.sh
-	@sed \
-	    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g'   \
-	    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g' \
-	    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g' \
-	    $(CUSTOMIZE_SRC) > $(MODULE_OUT)/customize.sh
+	@for pair in "module/src/post-fs-data.sh:post-fs-data.sh" "$(UNINSTALL_SRC):uninstall.sh" "$(CUSTOMIZE_SRC):customize.sh"; do \
+		src=$${pair%%:*}; dst=$${pair##*:}; \
+		sed \
+		    -e 's/@MIN_KSU_VERSION@/$(MIN_KSU_VERSION)/g' \
+		    -e 's/@MIN_KSUD_VERSION@/$(MIN_KSUD_VERSION)/g' \
+		    -e 's/@MIN_APATCH_VERSION@/$(MIN_APATCH_VERSION)/g' \
+		$$src > $(MODULE_OUT)/$$dst; \
+	done
 
 	@echo "Copying binaries..."
 	@for arch in $(ARCHS); do                                                                                  \

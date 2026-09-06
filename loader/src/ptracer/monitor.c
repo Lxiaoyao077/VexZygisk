@@ -209,15 +209,22 @@ bool rezygiskd_listener_init() {
 
 void rezygiskd_listener_callback() {
   while (1) {
-    uint8_t cmd;
+    uint8_t cmd = 0;
     ssize_t nread = TEMP_FAILURE_RETRY(read(monitor_sock_fd, &cmd, sizeof(cmd)));
     if (nread == -1) {
       if (errno == EINTR || errno == EWOULDBLOCK) break;
 
+      /* INFO: Any other error is permanent for this socket — continuing
+                would spin the monitor at 100% CPU on the same failure. The
+                next datagram the daemon sends re-arms the edge event. */
       PLOGE("read socket");
 
-      continue;
+      break;
     }
+
+    /* INFO: A zero-length datagram carries no command; skip it and keep
+              draining instead of dispatching on stale state. */
+    if (nread == 0) continue;
 
     switch (cmd) {
       case START: {

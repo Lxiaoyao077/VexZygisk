@@ -919,22 +919,22 @@ long remote_syscall(int pid, struct user_regs_struct *regs, uintptr_t syscall_ga
     return ret;
 }
 
-void tracee_skip_syscall(int pid) {
+bool tracee_skip_syscall(int pid) {
   struct user_regs_struct regs;
   if (!get_regs(pid, &regs)) {
     LOGE("Failed to get seccomp regs");
 
-    exit(1);
+    return false;
   }
 
   regs.REG_SYSNR = -1;
   if (!set_regs(pid, &regs)) {
     LOGE("Failed to set seccomp regs");
 
-    exit(1);
+    return false;
   }
 
-  /* INFO: It might not work, don't check for error */
+  /* INFO: Best effort — it might not work, don't fail for the SETREGSET */
   #if defined(__aarch64__)
     int sysnr = -1;
     struct iovec iov = {
@@ -945,6 +945,8 @@ void tracee_skip_syscall(int pid) {
   #elif defined(__arm__)
     ptrace(PTRACE_SET_SYSCALL, pid, 0, (void *) -1);
   #endif
+
+  return true;
 }
 
 void wait_for_trace(int pid, int *status, int flags) {
@@ -971,7 +973,19 @@ void wait_for_trace(int pid, int *status, int flags) {
 
       continue;
     } else if (*status >> 8 == (SIGTRAP | (PTRACE_EVENT_SECCOMP << 8))) {
-      tracee_skip_syscall(pid);
+      /* INFO: If the syscall cannot be skipped, continuing would execute the
+                trapped exit_group and the tracer holds EXITKILL — detach
+                instead, which releases the tracee alive and lets the caller
+                see the failure through the synthetic status. */
+      if (!tracee_skip_syscall(pid)) {
+        LOGE("Failed to skip the trapped syscall, detaching %d", pid);
+
+        ptrace(PTRACE_DETACH, pid, 0, 0);
+
+        *status = W_EXITCODE(255, 0);
+
+        return;
+      }
 
       ptrace(PTRACE_CONT, pid, 0, 0);
 

@@ -1,6 +1,11 @@
 #ifndef ART_METHOD_H
 #define ART_METHOD_H
 
+/* INFO: Single translation unit constraint — this header carries mutable
+         file-scope statics (art_method_field / data_offset) that must have
+         exactly one instance; including it from a second .c would silently
+         fork that state. Only hook.c includes it. */
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -60,6 +65,17 @@ static inline bool amethod_init(JNIEnv *env) {
 
   jmethodID get_declared_constructors = (*env)->GetMethodID(env, clz, "getDeclaredConstructors", "()[Ljava/lang/reflect/Constructor;");
   (*env)->DeleteLocalRef(env, clz);
+
+  /* INFO: Calling with a NULL jmethodID is undefined behaviour and would
+            take the zygote down; bail into the FromReflectedMethod path
+            instead. */
+  if (get_declared_constructors == NULL) {
+    LOGE("Failed to find Class.getDeclaredConstructors");
+
+    if (clazz) (*env)->DeleteLocalRef(env, clazz);
+
+    return false;
+  }
 
   jobjectArray constructors = (jobjectArray)(*env)->CallObjectMethod(env, throwable, get_declared_constructors);
   (*env)->DeleteLocalRef(env, throwable);

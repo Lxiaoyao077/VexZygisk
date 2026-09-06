@@ -503,8 +503,11 @@ static void initialize_jni_hook(void) {
       struct map_entry *map = &maps->maps[i];
       if (map->path == NULL || !strstr(map->path, "/libnativehelper.so")) continue;
 
-      /* TODO: Add RTLD_NOLOAD? */
-      void *handle = dlopen(map->path, RTLD_LAZY);
+      /* INFO: RTLD_NOLOAD answers the TODO that lived here: the library is
+                already mapped (it is in our own maps), so this hands back the
+                existing handle without bumping the reference count — and
+                without the dlopen/dlclose pair that briefly moved it. */
+      void *handle = dlopen(map->path, RTLD_LAZY | RTLD_NOLOAD);
       if (!handle) {
         LOGE("Failed to dlopen %s: %s", map->path, dlerror());
 
@@ -512,7 +515,6 @@ static void initialize_jni_hook(void) {
       }
 
       get_created_java_vms = (jint (*)(JavaVM **, jsize, jsize *))dlsym(handle, "JNI_GetCreatedJavaVMs");
-      dlclose(handle);
 
       break;
     }

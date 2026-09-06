@@ -1,0 +1,25 @@
+# INFO: The tree is developed from Linux and Windows checkouts alike; pin
+#       everything to LF so git stop churning line endings on every touch.
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.py text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.cc text eol=lf
+*.hpp text eol=lf
+*.rs text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.prop text eol=lf
+*.rule text eol=lf
+Makefile text eol=lf
+*.mk text eol=lf
+
+*.zip binary
+*.png binary
+*.jar binary
+*.webp binary

@@ -30,7 +30,15 @@ int main(int argc, char *argv[]) {
         return 1;
       }
 
-      int fd = atoi(argv[2]);
+      char *fd_end = NULL;
+      long parsed_fd = strtol(argv[2], &fd_end, 10);
+      if (fd_end == argv[2] || *fd_end != '\0' || parsed_fd < 0 || parsed_fd > 4095) {
+        LOGI("Invalid descriptor number: %s", argv[2]);
+
+        return 1;
+      }
+
+      int fd = (int)parsed_fd;
       companion_entry(fd);
 
       return 0;
@@ -41,7 +49,15 @@ int main(int argc, char *argv[]) {
         return 1;
       }
 
-      int fd = atoi(argv[2]);
+      char *fd_end = NULL;
+      long parsed_fd = strtol(argv[2], &fd_end, 10);
+      if (fd_end == argv[2] || *fd_end != '\0' || parsed_fd < 0 || parsed_fd > 4095) {
+        LOGI("Invalid descriptor number: %s", argv[2]);
+
+        return 1;
+      }
+
+      int fd = (int)parsed_fd;
       zn_companion_entry(fd);
 
       return 0;

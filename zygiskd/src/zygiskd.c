@@ -1131,7 +1131,7 @@ static void handle_spawn_zn_companion(struct Client *client) {
     if (strcmp(companion->lib_path, lib_path) != 0) continue;
 
     if (check_unix_socket(companion->fd, false)) {
-      LOGI("Reusing the Zygisk Next companion of \"%s\"", lib_path);
+      LOGD("Reusing the Zygisk Next companion of \"%s\"", lib_path);
 
       ret = write_uint8_t(client->fd, (uint8_t)1);
       ASSURE_SIZE_WRITE("SpawnZnCompanion", "response", ret, sizeof(uint8_t), return);
@@ -1234,7 +1234,7 @@ static void handle_read_zn_modules(struct Client *client) {
     return;
   }
 
-  LOGI("Serving %zu Zygisk Next module(s) to \"%s\"", files_len, process_name);
+  LOGD("Serving %zu Zygisk Next module(s) to \"%s\"", files_len, process_name);
 
   for (size_t i = 0; i < files_len; i++) {
     if (write_string(client->fd, files[i].lib_path) == -1) {
@@ -1302,7 +1302,7 @@ static void handle_request_companion_socket(struct Client *client) {
 
   /* The companion socket is ready to receive the client fd. */
   if (module->companion >= 0) {
-    LOGI(" - Sending companion fd socket of module \"%s\"", module->name);
+    LOGD(" - Sending companion fd socket of module \"%s\"", module->name);
 
     if (write_fd(module->companion, client->fd) == -1) {
       LOGE(" - Failed to send companion fd socket of module \"%s\"", module->name);

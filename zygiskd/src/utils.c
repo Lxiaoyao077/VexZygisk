@@ -135,7 +135,11 @@ void unix_datagram_sendto(const char *restrict path, const void *restrict buf, s
     goto restore;
   }
 
-  if (send(socket_fd, buf, len, 0) == -1) {
+  /* INFO: MSG_DONTWAIT keeps a wedged monitor from blocking the daemon in
+            send once its receive buffer fills: the status update is dropped
+            instead of stalling every zygote fork behind the request. The
+            datagram either lands on an alive socket or the loss is logged. */
+  if (send(socket_fd, buf, len, MSG_DONTWAIT) == -1) {
     LOGE("send: %s", strerror(errno));
 
     close(socket_fd);

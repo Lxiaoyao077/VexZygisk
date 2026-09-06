@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdio.h>
+
 #include "root_impl/common.h"
 #include "companion.h"
 #include "zn_companion.h"
@@ -9,6 +11,15 @@
 #include "utils.h"
 
 int main(int argc, char *argv[]) {
+  /* INFO: stdout is the module script's pipe, drained into the root
+            manager's log. The daemon is long-lived and logs to logd, so the
+            pipe side channel is cut before anything logs: in debug builds
+            every printf becomes a null write, and release ones compile away
+            entirely. Companions are execed from here and inherit it. */
+  if (freopen("/dev/null", "w", stdout) == NULL) {
+    /* INFO: Keep the inherited stdout; logd output is unaffected. */
+  }
+
   LOGI("Welcome to VexZygiskd%s", LP_SELECT("32", "64"));
 
   if (argc > 1) {

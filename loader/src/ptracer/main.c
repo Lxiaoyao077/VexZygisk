@@ -13,6 +13,15 @@ int main(int argc, char **argv) {
   printf("The VexZygisk Tracer %s\n\n", ZKSU_VERSION);
 
   if (argc >= 2 && strcmp(argv[1], "monitor") == 0) {
+    /* INFO: stdout is the module script's pipe, drained into the root
+              manager's log; the monitor is long-lived and its findings go to
+              logd, so the pipe side channel is cut at startup instead of
+              turning every status line into a wakeup of the log drainer.
+              The CLI subcommands below keep real stdout. */
+    if (freopen("/dev/null", "w", stdout) == NULL) {
+      /* INFO: Keep the inherited stdout; logd output is unaffected. */
+    }
+
     init_monitor();
 
     return 0;

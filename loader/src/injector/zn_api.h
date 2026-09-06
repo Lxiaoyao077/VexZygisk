@@ -13,4 +13,15 @@
          entry, and API v4 receives the full table. */
 const struct ZygiskNextAPI *zn_get_api_for_version(int target_api_version);
 
+/* INFO: Fires every HyperOS runtime module's onAppSpecialized with the
+         specialization strings; called from the app specialize post hook.
+         No-op until a module registered through getRuntime().registerModule
+         in this process (or the spawner it was forked from). */
+void zn_runtime_notify_app_specialized(const char *process_name, const char *package_name, const char *se_info);
+
+/* INFO: Whether any HyperOS runtime module registered in this process —
+         the specialize post hook checks it before doing the JNI work of
+         collecting the callback arguments. */
+bool zn_hyos_modules_registered(void);
+
 #endif /* ZN_API_H */

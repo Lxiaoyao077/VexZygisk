@@ -311,15 +311,93 @@ static int zn_connect_companion(void *handle) {
   return fd;
 }
 
-/* INFO: Nothing registers a runtime yet. Kept returning null rather than
-         failing the call: a module is expected to probe it and carry on. */
-static const struct ZygiskNextRuntime *zn_get_runtime(void) {
-  return NULL;
+/* INFO: The HyperOS runtime. On HyperOS, applications are forked by
+         /system_ext/bin/hyos_spawner rather than the classic zygote, and
+         modules that care speak the runtime contract: getRuntime() hands out
+         the table, registerModule() copies the callbacks in, and
+         zn_runtime_notify_app_specialized() (called from the specialize
+         post hook) fires every registered onAppSpecialized with the
+         specialization strings. The registry lives in this process's memory,
+         so children forked from the spawner inherit it. */
+#define ZN_HYOS_MODULE_MAX 16
+
+static struct ZygiskNextHyosModule zn_hyos_modules[ZN_HYOS_MODULE_MAX];
+static size_t zn_hyos_module_count = 0;
+
+static int zn_hyos_register_module(const void *module_ptr) {
+  const struct ZygiskNextHyosModule *module = (const struct ZygiskNextHyosModule *)module_ptr;
+
+  if (module == NULL || module->onAppSpecialized == NULL) return ZN_FAILED;
+
+  if (module->target_api_version <= 0 || module->target_api_version > ZYGISK_NEXT_HYOS_API_VERSION) {
+    LOGE("HyperOS runtime module targets API %d, supported is 1..%d",
+         module->target_api_version, ZYGISK_NEXT_HYOS_API_VERSION);
+
+    return ZN_FAILED;
+  }
+
+  if (zn_hyos_module_count >= ZN_HYOS_MODULE_MAX) {
+    LOGE("Reached the limit of %d HyperOS runtime modules", ZN_HYOS_MODULE_MAX);
+
+    return ZN_FAILED;
+  }
+
+  /* INFO: The contract is that the runtime copies the structure before
+            returning, so a module may reuse its storage. */
+  zn_hyos_modules[zn_hyos_module_count++] = *module;
+
+  return ZN_SUCCESS;
 }
 
-/* INFO: The Runtime API only exists from ZN API v4 onwards, so modules built
-           against an older version are told about it instead of being served
-           a table they would never have reached. */
+static const struct ZygiskNextRuntime zn_hyos_runtime = {
+  .type = ZN_RUNTIME_HYOS,
+  .api_version = ZYGISK_NEXT_HYOS_API_VERSION,
+  .registerModule = zn_hyos_register_module
+};
+
+/* INFO: The runtime is exposed in the hyos_spawner process tree only: the
+         spawner and the apps it forks all carry the same /proc/self/exe,
+         and a registration made there is inherited by every child. */
+static const struct ZygiskNextRuntime *zn_get_runtime(void) {
+  static int available = -1;
+
+  if (available == -1) {
+    char exe[PATH_MAX];
+    ssize_t length = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+
+    if (length <= 0) {
+      available = 0;
+    } else {
+      exe[length] = '\0';
+
+      const char *base = strrchr(exe, '/');
+
+      available = strcmp(base == NULL ? exe : base + 1, "hyos_spawner") == 0;
+    }
+  }
+
+  return available == 1 ? &zn_hyos_runtime : NULL;
+}
+
+bool zn_hyos_modules_registered(void) {
+  return zn_hyos_module_count > 0;
+}
+
+void zn_runtime_notify_app_specialized(const char *process_name, const char *package_name, const char *se_info) {
+  if (zn_hyos_module_count == 0) return;
+  /* INFO: The strings are read-only and only valid for the duration of the
+            callback, exactly as the contract promises. */
+  struct ZnHyosAppSpecializeArgs args = {
+    .process_name = process_name,
+    .package_name = package_name,
+    .se_info = se_info
+  };
+
+  for (size_t i = 0; i < zn_hyos_module_count; i++) {
+    zn_hyos_modules[i].onAppSpecialized(&args);
+  }
+}
+
 static const struct ZygiskNextRuntime *zn_get_runtime_unavailable(void) {
   LOGE("The runtime API needs a module built for API 4 or newer");
 

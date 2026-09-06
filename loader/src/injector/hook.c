@@ -26,6 +26,7 @@
 #include "cpp_strings.h"
 #include "registers.h"
 #include "unmount.h"
+#include "zn_api.h"
 #include "zn_loader.h"
 
 void *start_addr = NULL;
@@ -1195,6 +1196,36 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
 
 static void rz_app_specialize_post(struct zygisk_context *ctx) {
   rz_run_modules_post(ctx);
+
+  /* INFO: HyperOS runtime dispatch. Modules registered through
+             getRuntime().registerModule in the spawner (and inherited by
+             every forked child) are told about the specialization here —
+             after uid, groups and the SELinux context are applied, which is
+             where our post hook runs. The package name is the process name
+             up to the first ':', mirroring how Android derives one from the
+             other. */
+  if (zn_hyos_modules_registered()) {
+    const char *package = ctx->process;
+    const char *colon = strchr(ctx->process, ':');
+    char package_buffer[256];
+
+    if (colon != NULL && (size_t)(colon - ctx->process) < sizeof(package_buffer)) {
+      memcpy(package_buffer, ctx->process, (size_t)(colon - ctx->process));
+      package_buffer[colon - ctx->process] = '\0';
+      package = package_buffer;
+    }
+
+    const char *se_info = NULL;
+    if (ctx->args.app->se_info != NULL) {
+      se_info = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->se_info, NULL);
+    }
+
+    zn_runtime_notify_app_specialized(ctx->process, package, se_info);
+
+    if (se_info != NULL) {
+      (*ctx->env)->ReleaseStringUTFChars(ctx->env, *ctx->args.app->se_info, se_info);
+    }
+  }
 
   /* INFO: Allow the process name string to be released */
   (*ctx->env)->ReleaseStringUTFChars(ctx->env, *ctx->args.app->nice_name, ctx->process);

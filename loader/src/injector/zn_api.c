@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <dlfcn.h>
+#include <unistd.h>
 #include <dobby.h>
 #include <sys/types.h>
 

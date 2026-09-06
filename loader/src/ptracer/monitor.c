@@ -768,21 +768,17 @@ void sigchld_listener_callback() {
               is_tango = true;
             }
 #endif
-/* INFO: The HyperOS spawner injection is DISABLED after a field report of an
-          infinite second-screen bootloop on HyperOS: the spawner's spawn
-          pattern does not follow the classic zygote's single-fork contract
-          that our fork hook caches, and injecting into it corrupts app
-          spawning. The runtime API and the ZN target matching stay in place
-          (inert until something runs the loader inside that tree); enabling
-          this again requires device-side research first — capture dmesg and
-          the spawner's spawn flow, then gate on what it actually calls.
-#define VEX_EXPERIMENTAL_HYOS_SPAWNER
-*/
-#ifdef VEX_EXPERIMENTAL_HYOS_SPAWNER
+/* INFO: History: the first version of this branch shipped without any
+          handling for the spawner's PARALLEL spawn pattern and produced an
+          infinite second-screen bootloop on HyperOS — two concurrent spawn
+          pipelines overran the loader's process-global specialize state.
+          The loader now serializes its pipeline with a semaphore
+          (spawn_pipeline_enter/leave in hook.c), and the branch is enabled
+          again. If a bootloop ever recurs, capture dmesg during the loop
+          before touching this. */
             else if (strcmp(program, HYOS_SPAWNER_NAME) == 0) {
               tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
             }
-#endif
 
             if (tracer == NULL) break;
 

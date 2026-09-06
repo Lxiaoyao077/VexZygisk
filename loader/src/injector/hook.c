@@ -4,7 +4,9 @@
 #include <string.h>
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <regex.h>
+#include <semaphore.h>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -142,6 +144,37 @@ size_t zygisk_module_length = 0;
            state is unknown and the per-fork query still runs. */
 static bool zn_presence_known = false;
 static bool zn_modules_present = false;
+
+/* INFO: The specialize pipeline (early fork, fd snapshot, pre hooks, ART's
+           fork+specialize, post hooks) is a single global sequence: g_ctx
+           and the cached fork pid are process-global. The classic zygote
+           guarantees that by being single-threaded; HyperOS's hyos_spawner
+           exists to spawn apps in PARALLEL, so two threads could interleave
+           pipelines and hand both parents the same cached child — that is
+           the prime bootloop suspect.
+
+           A semaphore serializes the pipeline, and a semaphore rather than a
+           mutex because the fork inside the pipeline duplicates it into the
+           child: a semaphore has no owning thread, so the child's copy (left
+           at zero, taken mid-pipeline) is released by the child's own
+           pipeline-end post and the counts stay balanced in every process. */
+static sem_t spawn_pipeline_sem;
+static pthread_once_t spawn_pipeline_once = PTHREAD_ONCE_INIT;
+
+static void spawn_pipeline_sem_init(void) {
+  sem_init(&spawn_pipeline_sem, 0, 1);
+}
+
+static void spawn_pipeline_enter(void) {
+  pthread_once(&spawn_pipeline_once, spawn_pipeline_sem_init);
+
+  while (sem_wait(&spawn_pipeline_sem) == -1 && errno == EINTR) {
+  }
+}
+
+static void spawn_pipeline_leave(void) {
+  sem_post(&spawn_pipeline_sem);
+}
 
 static bool should_unmap_zygisk = false;
 static bool enable_unloader = false;
@@ -1322,6 +1355,8 @@ static void rz_nativeForkAndSpecialize_post(struct zygisk_context *ctx) {
 }
 
 static void rz_init(struct zygisk_context *ctx, JNIEnv *env, void *args) {
+  spawn_pipeline_enter();
+
   memset(ctx, 0, sizeof(struct zygisk_context));
 
   ctx->env = env;
@@ -1334,6 +1369,11 @@ static void rz_init(struct zygisk_context *ctx, JNIEnv *env, void *args) {
 
 static void rz_cleanup(struct zygisk_context *ctx) {
   g_ctx = NULL;
+
+  /* INFO: The pipeline is over as far as the process-global state is
+            concerned; parent and child each release their own copy of the
+            semaphore here (the child inherited it mid-pipeline). */
+  spawn_pipeline_leave();
 
   if (!is_zygote_child(ctx)) return;
 

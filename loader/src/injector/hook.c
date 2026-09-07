@@ -1295,12 +1295,14 @@ static void rz_nativeForkSystemServer_pre(struct zygisk_context *ctx) {
   LOGV("pre forkSystemServer");
   FLAG_SET(ctx, SERVER_FORK_AND_SPECIALIZE);
 
-  /* INFO: system_server is the first thing zygote forks, long before any app,
-           so reverting only in the app path left it forked off with the root
-           and module mounts still visible. Same rule as there: this runs in
-           zygote before the fork, so the child inherits the clean view. */
-  zygote_mounts_revert();
-
+  /* INFO: Deliberately no zygote_mounts_revert() here. system_server is the
+           first child zygote forks and the framework it brings up expects the
+           module tree to still be mounted: KernelSU's meta-module mechanism
+           hangs Zygisk and framework-level content off those very mounts, and
+           reverting before this fork made modules mounted that way stop
+           working. Zygote itself is reverted before the first app fork
+           instead, by which point the framework has already taken what it
+           needs. */
   rz_fork_pre(ctx);
   if (!is_zygote_child(ctx)) return;
 

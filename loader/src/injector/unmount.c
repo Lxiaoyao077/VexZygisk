@@ -45,6 +45,13 @@ struct mount_list {
 
 static bool g_zygote_reverted = false;
 
+/* INFO: Set when reverting was refused for a structural reason (an exact
+         /product mount among the traces). That is a property of the ROM, not
+         a transient failure, so it must not be retried: this runs before
+         every fork, and re-parsing mountinfo for a decision that cannot change
+         would tax every single app start. */
+static bool g_zygote_revert_refused = false;
+
 static void mount_list_free(struct mount_list *list) {
   for (size_t i = 0; i < list->len; i++) {
     free(list->items[i].root);
@@ -243,6 +250,7 @@ static bool abort_zygote_unmount(const struct mount_list *traces) {
 
 bool zygote_mounts_revert(void) {
   if (g_zygote_reverted) return true;
+  if (g_zygote_revert_refused) return false;
 
   struct mount_list all = { 0 };
   if (!mount_list_parse("/proc/self/mountinfo", &all)) {
@@ -273,6 +281,10 @@ bool zygote_mounts_revert(void) {
   mount_list_free(&all);
 
   if (abort_zygote_unmount(&traces)) {
+    /* INFO: Refused, not failed: the namespace fallback takes over from here
+              on and stays in place for the rest of this zygote's life. */
+    g_zygote_revert_refused = true;
+
     mount_list_free(&traces);
 
     return false;

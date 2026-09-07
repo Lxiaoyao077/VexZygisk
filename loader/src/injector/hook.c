@@ -4,7 +4,9 @@
 #include <string.h>
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <regex.h>
+#include <semaphore.h>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -26,6 +28,7 @@
 #include "cpp_strings.h"
 #include "registers.h"
 #include "unmount.h"
+#include "zn_api.h"
 #include "zn_loader.h"
 
 void *start_addr = NULL;
@@ -135,6 +138,43 @@ static size_t jni_hook_list_count = 0;
 
 struct rezygisk_module *zygisk_modules = NULL;
 size_t zygisk_module_length = 0;
+
+/* INFO: The daemon reports whether any Zygisk Next module exists at all in
+           the GetProcessFlags answer; until the first answer arrives the
+           state is unknown and the per-fork query still runs. */
+static bool zn_presence_known = false;
+static bool zn_modules_present = false;
+
+/* INFO: The specialize pipeline (early fork, fd snapshot, pre hooks, ART's
+           fork+specialize, post hooks) is a single global sequence: g_ctx
+           and the cached fork pid are process-global. The classic zygote
+           guarantees that by being single-threaded; HyperOS's hyos_spawner
+           exists to spawn apps in PARALLEL, so two threads could interleave
+           pipelines and hand both parents the same cached child — that is
+           the prime bootloop suspect.
+
+           A semaphore serializes the pipeline, and a semaphore rather than a
+           mutex because the fork inside the pipeline duplicates it into the
+           child: a semaphore has no owning thread, so the child's copy (left
+           at zero, taken mid-pipeline) is released by the child's own
+           pipeline-end post and the counts stay balanced in every process. */
+static sem_t spawn_pipeline_sem;
+static pthread_once_t spawn_pipeline_once = PTHREAD_ONCE_INIT;
+
+static void spawn_pipeline_sem_init(void) {
+  sem_init(&spawn_pipeline_sem, 0, 1);
+}
+
+static void spawn_pipeline_enter(void) {
+  pthread_once(&spawn_pipeline_once, spawn_pipeline_sem_init);
+
+  while (sem_wait(&spawn_pipeline_sem) == -1 && errno == EINTR) {
+  }
+}
+
+static void spawn_pipeline_leave(void) {
+  sem_post(&spawn_pipeline_sem);
+}
 
 static bool should_unmap_zygisk = false;
 static bool enable_unloader = false;
@@ -463,8 +503,11 @@ static void initialize_jni_hook(void) {
       struct map_entry *map = &maps->maps[i];
       if (map->path == NULL || !strstr(map->path, "/libnativehelper.so")) continue;
 
-      /* TODO: Add RTLD_NOLOAD? */
-      void *handle = dlopen(map->path, RTLD_LAZY);
+      /* INFO: RTLD_NOLOAD answers the TODO that lived here: the library is
+                already mapped (it is in our own maps), so this hands back the
+                existing handle without bumping the reference count — and
+                without the dlopen/dlclose pair that briefly moved it. */
+      void *handle = dlopen(map->path, RTLD_LAZY | RTLD_NOLOAD);
       if (!handle) {
         LOGE("Failed to dlopen %s: %s", map->path, dlerror());
 
@@ -472,7 +515,6 @@ static void initialize_jni_hook(void) {
       }
 
       get_created_java_vms = (jint (*)(JavaVM **, jsize, jsize *))dlsym(handle, "JNI_GetCreatedJavaVMs");
-      dlclose(handle);
 
       break;
     }
@@ -970,6 +1012,11 @@ static bool load_modules_only(void) {
     return false;
   }
 
+  /* INFO: Failure symmetry, reviewed: csoloader keeps no reference count,
+            so a load that fails inside csoloader_load has mapped nothing and
+            needs no release, while a library that loads but then misses its
+            entry point is explicitly csoloader_unload'ed below — the same
+            discipline the Zygisk Next path applies with dlclose. */
   /* INFO: The daemon compacts its list on every RemoveModule, so each removal
             shifts the modules that follow one slot to the left. The index
             reported to it is therefore offset by the removals already made;
@@ -1103,6 +1150,16 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
   }
 
   ctx->info_flags = rezygiskd_get_process_flags(uid, ctx->process);
+
+  /* INFO: Whether any Zygisk Next module exists is a daemon-wide fact, so
+            the first flags answer is remembered and every later fork skips
+            the ReadZnModules round trip when there is nothing to resolve.
+            Unknown until an answer arrives (system_server is typically the
+            very first fork), in which case the query still runs. */
+  if (!zn_presence_known) {
+    zn_modules_present = (ctx->info_flags & PROCESS_ZN_PRESENT) == PROCESS_ZN_PRESENT;
+    zn_presence_known = true;
+  }
   /* INFO: To ensure we are really using a clean mount namespace, we use
               the first process it as reference for clean mount namespace,
               before it even does something, so that it will be clean yet
@@ -1175,6 +1232,45 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
 static void rz_app_specialize_post(struct zygisk_context *ctx) {
   rz_run_modules_post(ctx);
 
+  /* INFO: HyperOS runtime dispatch. Modules registered through
+             getRuntime().registerModule in the spawner (and inherited by
+             every forked child) are told about the specialization here —
+             after uid, groups and the SELinux context are applied, which is
+             where our post hook runs. The package name is the process name
+             up to the first ':', mirroring how Android derives one from the
+             other. */
+  if (zn_hyos_modules_registered()) {
+    const char *package = ctx->process;
+    const char *colon = strchr(ctx->process, ':');
+    char package_buffer[256];
+
+    if (colon != NULL && (size_t)(colon - ctx->process) < sizeof(package_buffer)) {
+      memcpy(package_buffer, ctx->process, (size_t)(colon - ctx->process));
+      package_buffer[colon - ctx->process] = '\0';
+      package = package_buffer;
+    }
+
+    /* INFO: The contract promises non-null strings; an OOM inside
+              GetStringUTFChars clears its pending exception and degrades to
+              an empty se_info instead of handing the module a NULL. */
+    const char *se_info = "";
+    const char *se_info_chars = NULL;
+    if (ctx->args.app->se_info != NULL) {
+      se_info_chars = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->se_info, NULL);
+      if (se_info_chars != NULL) {
+        se_info = se_info_chars;
+      } else {
+        (*ctx->env)->ExceptionClear(ctx->env);
+      }
+    }
+
+    zn_runtime_notify_app_specialized(ctx->process, package, se_info);
+
+    if (se_info_chars != NULL) {
+      (*ctx->env)->ReleaseStringUTFChars(ctx->env, *ctx->args.app->se_info, se_info_chars);
+    }
+  }
+
   /* INFO: Allow the process name string to be released */
   (*ctx->env)->ReleaseStringUTFChars(ctx->env, *ctx->args.app->nice_name, ctx->process);
   g_ctx = NULL;
@@ -1187,7 +1283,7 @@ static void rz_nativeSpecializeAppProcess_pre(struct zygisk_context *ctx) {
   FLAG_SET(ctx, SKIP_FD_SANITIZATION);
   rz_app_specialize_pre(ctx);
 
-  zn_load_modules_for_process(ctx->process);
+  if (!zn_presence_known || zn_modules_present) zn_load_modules_for_process(ctx->process);
 }
 
 static void rz_nativeSpecializeAppProcess_post(struct zygisk_context *ctx) {
@@ -1214,7 +1310,7 @@ static void rz_nativeForkSystemServer_pre(struct zygisk_context *ctx) {
 
   /* INFO: Served after the fd sanitizer so the memfd and companion sockets
              the load opens are not treated as leaked fds and closed. */
-  zn_load_modules_for_process("system_server");
+  if (!zn_presence_known || zn_modules_present) zn_load_modules_for_process("system_server");
 }
 
 static void rz_nativeForkSystemServer_post(struct zygisk_context *ctx) {
@@ -1254,7 +1350,7 @@ static void rz_nativeForkAndSpecialize_pre(struct zygisk_context *ctx) {
              the system server path, and after the mount namespace switch so
              the daemon's handover is not lost to setns. Libraries inherited
              from the zygote are skipped inside the loader. */
-  zn_load_modules_for_process(ctx->process);
+  if (!zn_presence_known || zn_modules_present) zn_load_modules_for_process(ctx->process);
 }
 
 static void rz_nativeForkAndSpecialize_post(struct zygisk_context *ctx) {
@@ -1267,6 +1363,8 @@ static void rz_nativeForkAndSpecialize_post(struct zygisk_context *ctx) {
 }
 
 static void rz_init(struct zygisk_context *ctx, JNIEnv *env, void *args) {
+  spawn_pipeline_enter();
+
   memset(ctx, 0, sizeof(struct zygisk_context));
 
   ctx->env = env;
@@ -1279,6 +1377,11 @@ static void rz_init(struct zygisk_context *ctx, JNIEnv *env, void *args) {
 
 static void rz_cleanup(struct zygisk_context *ctx) {
   g_ctx = NULL;
+
+  /* INFO: The pipeline is over as far as the process-global state is
+            concerned; parent and child each release their own copy of the
+            semaphore here (the child inherited it mid-pipeline). */
+  spawn_pipeline_leave();
 
   if (!is_zygote_child(ctx)) return;
 

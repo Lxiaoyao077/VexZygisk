@@ -179,8 +179,12 @@ bool trace_zygote(int pid, bool tango_flag) {
 
   /* INFO: `status` intentionally still holds the stop observed right after the
             seize: the waits above only synchronized the syscall-stop and the
-            linker, and left it untouched. */
-  if (STOPPED_WITH(status, SIGSTOP, PTRACE_EVENT_STOP)) {
+            linker, and left it untouched. SEIZE stops with SIGSTOP, either as
+            PTRACE_EVENT_STOP or as a plain SIGSTOP (event 0) when the monitor
+            already stopped the target for hand-off, as with hyos_spawner. */
+  int stop_event = (int)((unsigned int)status >> 16);
+  if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP &&
+      (stop_event == PTRACE_EVENT_STOP || stop_event == 0)) {
     char *lib_path = "/data/adb/modules/rezygisk/lib" LP_SELECT("", "64") "/libzygisk.so";
     if (!inject_on_main(pid, lib_path, libc_init_resolved, libc_init_got_slot, tango_flag)) {
       LOGE("failed to inject");
@@ -201,27 +205,27 @@ bool trace_zygote(int pid, bool tango_flag) {
     if (STOPPED_WITH(status, SIGTRAP, PTRACE_EVENT_STOP)) {
       CONT_OR_DIE
       WAIT_OR_DIE
+    }
 
-      if (STOPPED_WITH(status, SIGCONT, 0)) {
-        LOGD("received SIGCONT");
+    if (STOPPED_WITH(status, SIGCONT, 0)) {
+      LOGD("received SIGCONT");
 
-        /* INFO: Due to kernel bugs, fixed in 5.16+, ptrace_message (msg of
+      /* INFO: Due to kernel bugs, fixed in 5.16+, ptrace_message (msg of
              PTRACE_GETEVENTMSG) may not represent the current state of
              the process. Because we set some options, which alters the
              ptrace_message, we need to call PTRACE_SYSCALL to reset the
              ptrace_message to 0, the default/normal state.
         */
-        ptrace(PTRACE_SYSCALL, pid, 0, 0);
+      ptrace(PTRACE_SYSCALL, pid, 0, 0);
 
-        WAIT_OR_DIE
+      WAIT_OR_DIE
 
-        ptrace(PTRACE_DETACH, pid, 0, SIGCONT);
-      }
+      ptrace(PTRACE_DETACH, pid, 0, SIGCONT);
     } else {
       char status_str[64];
       parse_status(status, status_str, sizeof(status_str));
 
-      LOGE("Expected SIGTRAP (event: EVENT_STOP), found: %s", status_str);
+      LOGE("Expected SIGTRAP or a direct SIGCONT, found: %s", status_str);
 
       ptrace(PTRACE_DETACH, pid, 0, 0);
 

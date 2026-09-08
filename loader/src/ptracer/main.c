@@ -49,7 +49,16 @@ int main(int argc, char **argv) {
       }
 
       if (!trace_zygote((int)pid, is_tango)) {
-        kill((pid_t)pid, SIGKILL);
+        /* INFO: A failed zygote trace must not leave a broken zygote running,
+                 so it is killed. A failed hyos_spawner trace is only detached
+                 and resumed: the spawner is what starts every application,
+                 and killing it would leave the system unable to launch any. */
+        if (do_restart) {
+          kill((pid_t)pid, SIGKILL);
+        } else {
+          ptrace(PTRACE_DETACH, (pid_t)pid, 0, SIGCONT);
+          kill((pid_t)pid, SIGCONT);
+        }
 
         return 1;
       }

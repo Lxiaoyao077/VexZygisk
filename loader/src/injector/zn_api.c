@@ -410,12 +410,67 @@ static bool zn_hyos_has_process_name = false;
 static bool zn_hyos_atfork_installed = false;
 static char zn_hyos_process_name[256];
 
+typedef pid_t (*zn_hyos_fork_fn)(void);
 typedef int (*zn_hyos_setcontext_fn)(uid_t uid, int is_system_server, const char *se_info, const char *pkg_name);
 typedef int (*zn_hyos_setname_fn)(pthread_t thread, const char *name);
 
+static zn_hyos_fork_fn zn_hyos_original_fork = NULL;
 static zn_hyos_setcontext_fn zn_hyos_original_setcontext = NULL;
 static zn_hyos_setname_fn zn_hyos_original_setname = NULL;
 static bool zn_hyos_hooks_warned = false;
+
+/* INFO: File identity of the spawner's own executable, so its PLT entries
+         can be hooked (YukiSU style). Rewriting spawner code in place for an
+         inline hook can fail where the image is not writable, while a GOT
+         entry always is. */
+static dev_t zn_hyos_spawner_dev = 0;
+static ino_t zn_hyos_spawner_inode = 0;
+
+static bool zn_hyos_spawner_file_identity(dev_t *dev, ino_t *inode) {
+  if (zn_hyos_spawner_inode != 0) {
+    *dev = zn_hyos_spawner_dev;
+    *inode = zn_hyos_spawner_inode;
+
+    return true;
+  }
+
+  struct maps_info *maps = parse_maps_safe("self");
+  if (maps == NULL) return false;
+
+  bool found = false;
+  for (size_t i = 0; i < maps->length; i++) {
+    struct map_entry *entry = &maps->maps[i];
+
+    if (entry->offset != 0 || entry->inode == 0 || entry->path == NULL) continue;
+    if (strstr(entry->path, "hyos_spawner") == NULL) continue;
+
+    zn_hyos_spawner_dev = entry->dev;
+    zn_hyos_spawner_inode = entry->inode;
+    *dev = zn_hyos_spawner_dev;
+    *inode = zn_hyos_spawner_inode;
+    found = true;
+
+    LOGD("HyperOS runtime: spawner image at %s (dev %lu, inode %lu)",
+         entry->path, (unsigned long)entry->dev, (unsigned long)entry->inode);
+
+    break;
+  }
+
+  free_maps(maps);
+
+  return found;
+}
+
+/* INFO: Marking the child at the fork return point is what actually fires:
+         the spawner forks through its own PLT, and inline-hooking fork in a
+         writable image is not always possible. */
+static pid_t zn_hyos_fork_hook(void) {
+  pid_t result = zn_hyos_original_fork != NULL ? zn_hyos_original_fork() : -1;
+
+  if (result == 0) zn_hyos_atfork_child();
+
+  return result;
+}
 
 /* INFO: Fires once per child: the callback contract promises exactly one
          onAppSpecialized per app process. */
@@ -473,6 +528,39 @@ static void zn_hyos_atfork_child(void) {
          the hooks have to be in place before the child runs, and a library
          loaded later may have brought the symbols with it. */
 static void zn_hyos_install_hooks(void) {
+  /* INFO: YukiSU-style PLT hooks on the spawner's own image are tried first:
+           they only rewrite GOT entries, which always works, whereas an
+           inline hook rewrites code and can be refused. The spawner calls
+           fork and selinux_android_setcontext through its own PLT. */
+  dev_t spawner_dev = 0;
+  ino_t spawner_inode = 0;
+
+  if (zn_hyos_spawner_file_identity(&spawner_dev, &spawner_inode)) {
+    if (zn_hyos_original_fork == NULL) {
+      void *backup = NULL;
+
+      if (zn_lsplt_register_hook(spawner_dev, spawner_inode, "fork",
+                                 (void *)(uintptr_t)zn_hyos_fork_hook, &backup) == 0 &&
+          zn_lsplt_commit_hook() == 0 && backup != NULL) {
+        zn_hyos_original_fork = (zn_hyos_fork_fn)(uintptr_t)backup;
+
+        LOGD("HyperOS runtime: PLT hooked fork in the spawner");
+      }
+    }
+
+    if (zn_hyos_original_setcontext == NULL) {
+      void *backup = NULL;
+
+      if (zn_lsplt_register_hook(spawner_dev, spawner_inode, "selinux_android_setcontext",
+                                 (void *)(uintptr_t)zn_hyos_setcontext_hook, &backup) == 0 &&
+          zn_lsplt_commit_hook() == 0 && backup != NULL) {
+        zn_hyos_original_setcontext = (zn_hyos_setcontext_fn)(uintptr_t)backup;
+
+        LOGD("HyperOS runtime: PLT hooked selinux_android_setcontext in the spawner");
+      }
+    }
+  }
+
   if (zn_hyos_original_setcontext == NULL) {
     void *target = dlsym(RTLD_DEFAULT, "selinux_android_setcontext");
 
@@ -487,7 +575,7 @@ static void zn_hyos_install_hooks(void) {
       if (zn_inline_hook(target, (void *)(uintptr_t)zn_hyos_setcontext_hook, &backup) == ZN_SUCCESS) {
         zn_hyos_original_setcontext = (zn_hyos_setcontext_fn)(uintptr_t)backup;
 
-        LOGD("HyperOS runtime: hooked selinux_android_setcontext at %p", target);
+        LOGD("HyperOS runtime: inline hooked selinux_android_setcontext at %p", target);
       }
     }
   }

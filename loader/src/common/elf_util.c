@@ -71,31 +71,50 @@ static bool xz_decompress(const uint8_t *in, size_t in_size, uint8_t **out_buf, 
     .out_size = capacity
   };
 
-  enum xz_ret result = XZ_OK;
+  bool ok = false;
 
-  while (result == XZ_OK && buffer.out_pos == buffer.out_size) {
-    if (capacity >= XZ_OUT_LIMIT) break;
+  for (;;) {
+    enum xz_ret result = xz_dec_run(decoder, &buffer);
 
-    size_t bigger = capacity * 2;
-    uint8_t *grown = (uint8_t *)realloc(out, bigger);
-    if (grown == NULL) break;
+    if (result == XZ_STREAM_END) {
+      ok = true;
 
-    out = grown;
-    capacity = bigger;
-    buffer.out = out;
-    buffer.out_size = capacity;
+      break;
+    }
 
-    result = xz_dec_run(decoder, &buffer);
+    /* INFO: XZ_DEC_ANY_CHECK accepts every integrity check, so this should
+             not surface; keeping it mirrors the reference decoder. */
+    if (result == XZ_UNSUPPORTED_CHECK) continue;
+    if (result != XZ_OK) break;
+
+    if (buffer.out_pos == buffer.out_size) {
+      /* INFO: The output filled up mid-stream: double it and carry on. */
+      if (capacity >= XZ_OUT_LIMIT) break;
+
+      size_t bigger = capacity * 2;
+      uint8_t *grown = (uint8_t *)realloc(out, bigger);
+      if (grown == NULL) break;
+
+      out = grown;
+      capacity = bigger;
+      buffer.out = out;
+      buffer.out_size = capacity;
+
+      continue;
+    }
+
+    /* INFO: XZ_OK with output still to spare means the input ran out before
+             the stream ended. */
+    if (buffer.in_pos == buffer.in_size) break;
   }
 
-  if (result != XZ_STREAM_END) {
-    xz_dec_end(decoder);
+  xz_dec_end(decoder);
+
+  if (!ok) {
     free(out);
 
     return false;
   }
-
-  xz_dec_end(decoder);
 
   *out_buf = out;
   *out_size = buffer.out_pos;

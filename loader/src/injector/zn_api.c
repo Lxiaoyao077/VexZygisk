@@ -360,7 +360,11 @@ static void zn_hyos_deliver(const char *pkg_name, const char *se_info) {
 
   LOGD("HyperOS runtime: app specialized, process=%s package=%s", process_name, pkg_name);
 
-  zn_runtime_notify_app_specialized(process_name, pkg_name, se_info);
+  /* INFO: The contract hands the modules strings, never NULL: a package the
+            platform did not resolve is an empty one. */
+  zn_runtime_notify_app_specialized(process_name,
+                                    pkg_name != NULL ? pkg_name : "",
+                                    se_info != NULL ? se_info : "");
 }
 
 static int zn_hyos_setcontext_hook(uid_t uid, int is_system_server, const char *se_info, const char *pkg_name) {

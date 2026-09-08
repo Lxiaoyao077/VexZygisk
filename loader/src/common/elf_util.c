@@ -17,6 +17,27 @@
 
 #include "xz.h"
 
+/* INFO: xz-embedded in XZ_INTERNAL_CRC32 mode calls these from the stream
+         decoder; the kernel normally supplies them. Software CRC32, same
+         table as the reference build. */
+void xz_crc32_init(void) {}
+
+uint32_t xz_crc32(const uint8_t *buf, size_t size, uint32_t crc) {
+  crc = ~crc;
+
+  for (size_t i = 0; i < size; i++) {
+    crc ^= buf[i];
+
+    for (int bit = 0; bit < 8; bit++) {
+      uint32_t mask = 0U - (crc & 1U);
+
+      crc = (crc >> 1U) ^ (0xedb88320U & mask);
+    }
+  }
+
+  return ~crc;
+}
+
 /* INFO: Mini-debug info (.gnu_debugdata) support. The section holds an XZ
           stream (LZMA2 inside the XZ container) that decompresses into a
           small ELF carrying the full .symtab of an otherwise stripped

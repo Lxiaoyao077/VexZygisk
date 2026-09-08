@@ -231,7 +231,7 @@ $(LZMA_OBJS): $(OBJ_DIR)/external/lzma/%.o: $(LZMA_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC_ARCH) $(NDK_CFLAGS) $(LZMA_CFLAGS) $(COMMON_INCLUDES) -fPIC -c $< -o $@
 
-$(LIBCOMMON): $(COMMON_OBJS) $(LZMA_OBJ)
+$(LIBCOMMON): $(COMMON_OBJS) $(LZMA_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 

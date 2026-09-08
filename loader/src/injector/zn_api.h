@@ -19,6 +19,11 @@ const struct ZygiskNextAPI *zn_get_api_for_version(int target_api_version);
          in this process (or the spawner it was forked from). */
 void zn_runtime_notify_app_specialized(const char *process_name, const char *package_name, const char *se_info);
 
+/* INFO: Whether this process is the HyperOS app spawner (or one of the apps
+         it forked, which share its /proc/self/exe). The injector uses it to
+         skip the zygote-only hooks. */
+bool zn_is_hyos_spawner(void);
+
 /* INFO: Whether any HyperOS runtime module registered in this process —
          the specialize post hook checks it before doing the JNI work of
          collecting the callback arguments. */

@@ -1,5 +1,6 @@
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -325,6 +326,130 @@ static int zn_connect_companion(void *handle) {
 static struct ZygiskNextHyosModule zn_hyos_modules[ZN_HYOS_MODULE_MAX];
 static size_t zn_hyos_module_count = 0;
 
+/* INFO: The spawner forks applications itself, so the ART hooks that announce
+         a specialization in a zygote simply are not there: nothing calls
+         forkAndSpecialize in this process tree. What every forked app does go
+         through is our own pthread_atfork and, on the system's side,
+         selinux_android_setcontext — and that call carries the uid, the seinfo
+         and the package name, which is exactly what onAppSpecialized promises.
+         pthread_setname_np adds the process name Android sets right after.
+
+         Without these the runtime table is handed out but nothing ever fires,
+         and a module waiting on onAppSpecialized just never runs. */
+static bool zn_hyos_in_child = false;
+static bool zn_hyos_fired = false;
+static bool zn_hyos_has_process_name = false;
+static bool zn_hyos_atfork_installed = false;
+static char zn_hyos_process_name[256];
+
+typedef int (*zn_hyos_setcontext_fn)(uid_t uid, int is_system_server, const char *se_info, const char *pkg_name);
+typedef int (*zn_hyos_setname_fn)(pthread_t thread, const char *name);
+
+static zn_hyos_setcontext_fn zn_hyos_original_setcontext = NULL;
+static zn_hyos_setname_fn zn_hyos_original_setname = NULL;
+static bool zn_hyos_hooks_warned = false;
+
+/* INFO: Fires once per child: the callback contract promises exactly one
+         onAppSpecialized per app process. */
+static void zn_hyos_deliver(const char *pkg_name, const char *se_info) {
+  if (!zn_hyos_in_child || zn_hyos_fired || zn_hyos_module_count == 0) return;
+
+  zn_hyos_fired = true;
+
+  const char *process_name = zn_hyos_has_process_name ? zn_hyos_process_name : "hyos_app";
+
+  LOGD("HyperOS runtime: app specialized, process=%s package=%s", process_name, pkg_name);
+
+  zn_runtime_notify_app_specialized(process_name, pkg_name, se_info);
+}
+
+static int zn_hyos_setcontext_hook(uid_t uid, int is_system_server, const char *se_info, const char *pkg_name) {
+  int result = zn_hyos_original_setcontext != NULL
+    ? zn_hyos_original_setcontext(uid, is_system_server, se_info, pkg_name)
+    : -1;
+
+  if (result == 0) {
+    zn_hyos_deliver(pkg_name, se_info);
+  } else if (zn_hyos_in_child && !zn_hyos_fired) {
+    LOGW("HyperOS runtime: selinux_android_setcontext failed (%d)", result);
+  }
+
+  return result;
+}
+
+static int zn_hyos_setname_hook(pthread_t thread, const char *name) {
+  int result = zn_hyos_original_setname != NULL ? zn_hyos_original_setname(thread, name) : -1;
+
+  if (result == 0 && !zn_hyos_has_process_name && zn_hyos_in_child && !zn_hyos_fired && name != NULL) {
+    snprintf(zn_hyos_process_name, sizeof(zn_hyos_process_name), "%s", name);
+    zn_hyos_has_process_name = true;
+
+    LOGD("HyperOS runtime: captured process name %s", zn_hyos_process_name);
+  }
+
+  return result;
+}
+
+static void zn_hyos_atfork_child(void) {
+  zn_hyos_in_child = true;
+  zn_hyos_fired = false;
+  zn_hyos_has_process_name = false;
+  zn_hyos_process_name[0] = '\0';
+}
+
+/* INFO: Installed from the fork prepare handler as well as at registration:
+         the hooks have to be in place before the child runs, and a library
+         loaded later may have brought the symbols with it. */
+static void zn_hyos_install_hooks(void) {
+  if (zn_hyos_original_setcontext == NULL) {
+    void *target = dlsym(RTLD_DEFAULT, "selinux_android_setcontext");
+
+    if (target == NULL) {
+      void *handle = dlopen("libselinux.so", RTLD_NOW);
+      if (handle != NULL) target = dlsym(handle, "selinux_android_setcontext");
+    }
+
+    if (target != NULL) {
+      void *backup = NULL;
+
+      if (zn_inline_hook(target, (void *)(uintptr_t)zn_hyos_setcontext_hook, &backup) == ZN_SUCCESS) {
+        zn_hyos_original_setcontext = (zn_hyos_setcontext_fn)(uintptr_t)backup;
+
+        LOGD("HyperOS runtime: hooked selinux_android_setcontext at %p", target);
+      }
+    }
+  }
+
+  if (zn_hyos_original_setname == NULL) {
+    void *target = dlsym(RTLD_DEFAULT, "pthread_setname_np");
+
+    if (target == NULL) {
+      void *handle = dlopen("libc.so", RTLD_NOW);
+      if (handle != NULL) target = dlsym(handle, "pthread_setname_np");
+    }
+
+    if (target != NULL) {
+      void *backup = NULL;
+
+      if (zn_inline_hook(target, (void *)(uintptr_t)zn_hyos_setname_hook, &backup) == ZN_SUCCESS) {
+        zn_hyos_original_setname = (zn_hyos_setname_fn)(uintptr_t)backup;
+
+        LOGD("HyperOS runtime: hooked pthread_setname_np at %p", target);
+      }
+    }
+  }
+
+  if (zn_hyos_original_setcontext == NULL && !zn_hyos_hooks_warned) {
+    zn_hyos_hooks_warned = true;
+
+    LOGW("HyperOS runtime: selinux_android_setcontext is unreachable, onAppSpecialized will not fire");
+  }
+}
+
+static void zn_hyos_atfork_prepare(void) {
+  if (zn_hyos_module_count > 0) zn_hyos_install_hooks();
+}
+
 static int zn_hyos_register_module(const void *module_ptr) {
   const struct ZygiskNextHyosModule *module = (const struct ZygiskNextHyosModule *)module_ptr;
 
@@ -347,6 +472,19 @@ static int zn_hyos_register_module(const void *module_ptr) {
             returning, so a module may reuse its storage. */
   zn_hyos_modules[zn_hyos_module_count++] = *module;
 
+  /* INFO: Only the spawner itself registers. The children it forks inherit
+            the table through fork, and re-arming the fork handlers in each of
+            them would stack up one pair per registration. */
+  if (!zn_hyos_in_child && !zn_hyos_atfork_installed) {
+    zn_hyos_atfork_installed = true;
+
+    pthread_atfork(zn_hyos_atfork_prepare, NULL, zn_hyos_atfork_child);
+  }
+
+  zn_hyos_install_hooks();
+
+  LOGD("HyperOS runtime: module registered (%zu total)", zn_hyos_module_count);
+
   return ZN_SUCCESS;
 }
 
@@ -359,25 +497,42 @@ static const struct ZygiskNextRuntime zn_hyos_runtime = {
 /* INFO: The runtime is exposed in the hyos_spawner process tree only: the
          spawner and the apps it forks all carry the same /proc/self/exe,
          and a registration made there is inherited by every child. */
-static const struct ZygiskNextRuntime *zn_get_runtime(void) {
-  static int available = -1;
+/* INFO: The spawner and every app it forks carry the same /proc/self/exe, so
+         this identifies the whole tree. An upgraded binary leaves a
+         " (deleted)" suffix on the link target. */
+static bool zn_hyos_process_is_spawner(void) {
+  static int is_spawner = -1;
 
-  if (available == -1) {
+  if (is_spawner == -1) {
+    is_spawner = 0;
+
     char exe[PATH_MAX];
     ssize_t length = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
 
-    if (length <= 0) {
-      available = 0;
-    } else {
+    if (length > 0) {
       exe[length] = '\0';
+
+      size_t len = (size_t)length;
+      if (len > 10 && strcmp(exe + len - 10, " (deleted)") == 0) {
+        len -= 10;
+        exe[len] = '\0';
+      }
 
       const char *base = strrchr(exe, '/');
 
-      available = strcmp(base == NULL ? exe : base + 1, "hyos_spawner") == 0;
+      is_spawner = strcmp(base == NULL ? exe : base + 1, "hyos_spawner") == 0;
     }
   }
 
-  return available == 1 ? &zn_hyos_runtime : NULL;
+  return is_spawner == 1;
+}
+
+bool zn_is_hyos_spawner(void) {
+  return zn_hyos_process_is_spawner();
+}
+
+static const struct ZygiskNextRuntime *zn_get_runtime(void) {
+  return zn_hyos_process_is_spawner() ? &zn_hyos_runtime : NULL;
 }
 
 bool zn_hyos_modules_registered(void) {

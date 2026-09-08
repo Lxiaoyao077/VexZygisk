@@ -752,6 +752,7 @@ void sigchld_listener_callback() {
 
           const char *tracer = NULL;
           bool is_tango = false;
+          bool is_spawner = false;
 
           do {
             if (tracing_state != TRACING) {
@@ -785,6 +786,7 @@ void sigchld_listener_callback() {
           before touching this. */
             else if (strcmp(program, HYOS_SPAWNER_NAME) == 0) {
               tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
+              is_spawner = true;
             }
 
             if (tracer == NULL) break;
@@ -836,7 +838,9 @@ void sigchld_listener_callback() {
                 char pid_str[32];
                 snprintf(pid_str, sizeof(pid_str), "%d", pid);
 
-                LOGI("exec tracer command: %s trace %s --restart%s", tracer, pid_str, is_tango ? " --tango" : "");
+                LOGI("exec tracer command: %s trace %s%s%s", tracer, pid_str,
+                     (count_zygote > 1 && !is_spawner) ? " --restart" : "",
+                     is_tango ? " --tango" : "");
 
                 const char *tracer_name = position_after(tracer, '/');
 
@@ -846,7 +850,11 @@ void sigchld_listener_callback() {
                 exec_argv[exec_argc++] = (char *)tracer_name;
                 exec_argv[exec_argc++] = "trace";
                 exec_argv[exec_argc++] = pid_str;
-                if (count_zygote > 1) exec_argv[exec_argc++] = "--restart";
+                /* INFO: The spawner is not a zygote restart. Telling the
+                          daemon otherwise makes it drop every companion, and
+                          the apps the spawner already forked are left talking
+                          to nothing. */
+                if (count_zygote > 1 && !is_spawner) exec_argv[exec_argc++] = "--restart";
                 if (is_tango) exec_argv[exec_argc++] = "--tango";
                 exec_argv[exec_argc] = NULL;
 

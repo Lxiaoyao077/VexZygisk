@@ -4,6 +4,7 @@
 
 #include "hook.h"
 #include "ptrace_clear.h"
+#include "zn_api.h"
 #include "zn_loader.h"
 
 __attribute__((visibility("default")))
@@ -12,6 +13,26 @@ void entry(void *addr, size_t size, int tango_flag) {
 
   start_addr = addr;
   block_size = size;
+
+  /* INFO: HyperOS forks applications from /system_ext/bin/hyos_spawner instead
+           of a zygote, and there is no ART specialize path in it to hook —
+           hooking the JNI there is what crashed the spawner and left every
+           app unable to start (the second-screen loop). The spawner only
+           carries the runtime: the modules load, register through
+           getRuntime(), and are notified from the fork and SELinux hooks the
+           runtime installs. Everything below belongs to the zygote. */
+  if (zn_is_hyos_spawner()) {
+    LOGD("Running inside hyos_spawner, initializing the HyperOS runtime");
+
+    zn_load_all_modules();
+
+    struct kernel_version spawner_version = parse_kversion();
+    if (spawner_version.major > 3 || (spawner_version.major == 3 && spawner_version.minor >= 8)) {
+      perform_ptrace_message_clear();
+    }
+
+    return;
+  }
 
   LOGD("start plt hooking");
   hook_functions();

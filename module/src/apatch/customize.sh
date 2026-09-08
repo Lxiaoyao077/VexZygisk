@@ -53,6 +53,17 @@ extract "$ZIPFILE" 'customize.sh'  "$TMPDIR/.vunzip"
 extract "$ZIPFILE" 'verify.sh'     "$TMPDIR/.vunzip"
 extract "$ZIPFILE" 'sepolicy.rule' "$TMPDIR"
 
+# INFO: Stop a monitor left over from the previous install. It rewrites
+#         module.prop on every status change, and a write landing while this
+#         installer is replacing the file can leave a half-read copy behind.
+if [ "$BOOTMODE" ]; then
+  for tracer in     /data/adb/modules/rezygisk/bin/zygisk-ptrace64     /data/adb/modules/rezygisk/bin/zygisk-ptrace32; do
+    [ -f "$tracer" ] && "$tracer" ctl exit >/dev/null 2>&1
+  done
+
+  killall -9 zygisk-ptrace64 zygisk-ptrace32 >/dev/null 2>&1 || true
+fi
+
 ui_print "- Extracting module files"
 extract "$ZIPFILE" 'module.prop'     "$MODPATH"
 extract "$ZIPFILE" 'post-fs-data.sh' "$MODPATH"

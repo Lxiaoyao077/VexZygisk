@@ -967,7 +967,9 @@ static void json_escape_into(char *dst, size_t cap, const char *src) {
   for (const unsigned char *cursor = (const unsigned char *)src; *cursor != '\0' && off + 1 < cap; cursor++) {
     unsigned char c = *cursor;
     const char *escape = NULL;
-    char short_escape[3] = { 0 };
+    /* INFO: \uXXXX plus the terminator; a three byte buffer truncated
+              every control character to a broken escape. */
+    char short_escape[8] = { 0 };
 
     switch (c) {
       case '"': escape = "\\\""; break;

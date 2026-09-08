@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 #include "daemon.h"
 #include "logging.h"
 #include "misc.h"
@@ -20,22 +22,16 @@ void entry(void *addr, size_t size, int tango_flag) {
            app unable to start (the second-screen loop). The spawner only
            carries the runtime: the modules load, register through
            getRuntime(), and are notified from the fork and SELinux hooks the
-           runtime installs. Everything below belongs to the zygote. */
-  if (zn_is_hyos_spawner()) {
+           runtime installs. The JNI and PLT hooks belong to the zygote. */
+  bool is_spawner = zn_is_hyos_spawner();
+
+  if (is_spawner) {
     LOGD("Running inside hyos_spawner, initializing the HyperOS runtime");
+  } else {
+    LOGD("start plt hooking");
 
-    zn_load_all_modules();
-
-    struct kernel_version spawner_version = parse_kversion();
-    if (spawner_version.major > 3 || (spawner_version.major == 3 && spawner_version.minor >= 8)) {
-      perform_ptrace_message_clear();
-    }
-
-    return;
+    hook_functions();
   }
-
-  LOGD("start plt hooking");
-  hook_functions();
 
   zn_load_all_modules();
 
@@ -45,6 +41,10 @@ void entry(void *addr, size_t size, int tango_flag) {
 
     perform_ptrace_message_clear();
   }
+
+  /* INFO: The daemon's zygote bookkeeping is about the zygote: the spawner
+           has no specialize to track and no companions of its own. */
+  if (is_spawner) return;
 
   if (!rezygiskd_zygote_injected()) {
     LOGE("VexZygiskd is not running");

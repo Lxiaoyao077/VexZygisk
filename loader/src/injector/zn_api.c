@@ -25,8 +25,35 @@ int zn_lsplt_commit_hook(void);
 
 /* INFO: LSPlt identifies libraries by file identity (device + inode), while
          the ZN API hands us a base address, so the owning mapping is looked
-         up in the process maps. */
+         up in the process maps.
+
+         A module hooks several symbols per library, and every call used to
+         re-scan /proc/self/maps in full. The base of a library that is still
+         loaded resolves to the same file identity every time, so the lookups
+         are cached. The table only needs to hold the libraries a module is
+         hooking right now; a base that gets reused for a different file after
+         a dlclose is rare and simply evicts itself once the table is full. */
+#define ZN_PLT_LOCATION_CACHE 16
+
+struct zn_plt_location {
+  uintptr_t base;
+  dev_t dev;
+  ino_t inode;
+};
+
+static struct zn_plt_location zn_plt_locations[ZN_PLT_LOCATION_CACHE];
+static size_t zn_plt_locations_len = 0;
+
 static bool get_lib_location_by_base(uintptr_t base_addr, dev_t *dev, ino_t *inode) {
+  for (size_t i = 0; i < zn_plt_locations_len; i++) {
+    if (zn_plt_locations[i].base != base_addr) continue;
+
+    *dev = zn_plt_locations[i].dev;
+    *inode = zn_plt_locations[i].inode;
+
+    return true;
+  }
+
   struct maps_info *maps = parse_maps_safe("self");
   if (maps == NULL) {
     LOGE("Failed to scan maps for the library at %p", (void *)base_addr);
@@ -34,23 +61,64 @@ static bool get_lib_location_by_base(uintptr_t base_addr, dev_t *dev, ino_t *ino
     return false;
   }
 
+  /* INFO: The module may pass the load base, the load bias or any address
+            inside the library, so the owning mapping is found first and its
+            file identity is then resolved to the mapping at offset zero,
+            which is what LSPlt keys on. */
   bool found = false;
   for (size_t i = 0; i < maps->length; i++) {
     struct map_entry *entry = &maps->maps[i];
-    if (entry->start != base_addr || entry->offset != 0 || entry->path == NULL) continue;
 
-    *dev = entry->dev;
-    *inode = entry->inode;
-    found = true;
+    if (entry->inode == 0 || entry->path == NULL) continue;
+
+    uintptr_t load_base = entry->start - entry->offset;
+    bool inside = (base_addr >= entry->start && base_addr < entry->end) ||
+                  base_addr == entry->start || base_addr == load_base;
+    if (!inside) continue;
+
+    for (size_t j = 0; j < maps->length; j++) {
+      struct map_entry *head = &maps->maps[j];
+
+      if (head->dev == entry->dev && head->inode == entry->inode && head->offset == 0) {
+        *dev = head->dev;
+        *inode = head->inode;
+        found = true;
+
+        break;
+      }
+    }
+
+    if (!found) {
+      *dev = entry->dev;
+      *inode = entry->inode;
+      found = true;
+    }
 
     break;
   }
 
   free_maps(maps);
 
-  if (!found) LOGE("No library mapped at %p", (void *)base_addr);
+  if (!found) {
+    LOGE("No library mapped at %p", (void *)base_addr);
 
-  return found;
+    return false;
+  }
+
+  /* INFO: Evict the oldest entry when the table is full, so a module that
+            hooks many libraries keeps the most recently touched ones. */
+  if (zn_plt_locations_len == ZN_PLT_LOCATION_CACHE) {
+    memmove(&zn_plt_locations[0], &zn_plt_locations[1],
+            (ZN_PLT_LOCATION_CACHE - 1) * sizeof(struct zn_plt_location));
+    zn_plt_locations_len--;
+  }
+
+  zn_plt_locations[zn_plt_locations_len].base = base_addr;
+  zn_plt_locations[zn_plt_locations_len].dev = *dev;
+  zn_plt_locations[zn_plt_locations_len].inode = *inode;
+  zn_plt_locations_len++;
+
+  return true;
 }
 
 static int zn_plt_hook(void *base_addr, const char *symbol, void *hook_handler, void **original) {

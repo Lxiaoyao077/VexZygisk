@@ -464,6 +464,8 @@ static bool zn_hyos_spawner_file_identity(dev_t *dev, ino_t *inode) {
 /* INFO: Marking the child at the fork return point is what actually fires:
          the spawner forks through its own PLT, and inline-hooking fork in a
          writable image is not always possible. */
+static void zn_hyos_atfork_child(void);
+
 static pid_t zn_hyos_fork_hook(void) {
   pid_t result = zn_hyos_original_fork != NULL ? zn_hyos_original_fork() : -1;
 

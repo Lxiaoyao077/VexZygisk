@@ -194,6 +194,17 @@ static char *read_process_path(void) {
 
   buf[len] = '\0';
 
+  /* INFO: The kernel appends " (deleted)" when the on-disk binary was
+           replaced while running (an OTA, say), which would otherwise stop
+           hyos_spawner and friends from matching their expected path. */
+  static const char kDeletedSuffix[] = " (deleted)";
+
+  if ((size_t)len > sizeof(kDeletedSuffix) - 1 &&
+      memcmp(buf + len - (sizeof(kDeletedSuffix) - 1), kDeletedSuffix, sizeof(kDeletedSuffix) - 1) == 0) {
+    len -= (ssize_t)(sizeof(kDeletedSuffix) - 1);
+    buf[len] = '\0';
+  }
+
   return strdup(buf);
 }
 

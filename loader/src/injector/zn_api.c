@@ -144,11 +144,16 @@ static int zn_plt_hook(void *base_addr, const char *symbol, void *hook_handler, 
     return ZN_FAILED;
   }
 
-  /* INFO: LSPlt only fills the backup when it actually replaced a GOT entry.
-             An unhook and a redundant re-registration leave it NULL while
-             still succeeding, so the result is judged by the commit alone.
-             Reporting those as failures would tell a module that its unhook
-             went wrong exactly when it went right. */
+  /* INFO: A NULL backup means LSPlt never replaced an entry for this symbol.
+           The previous code still reported success and handed the module a
+           NULL original, which a module that trusts the return value would
+           then call. Fail instead, before *original is touched. */
+  if (backup == NULL) {
+    LOGE("No PLT entry was replaced for %s", symbol);
+
+    return ZN_FAILED;
+  }
+
   if (original != NULL) *original = backup;
 
   return ZN_SUCCESS;
@@ -265,11 +270,6 @@ static void *zn_symbol_lookup(struct ZnSymbolResolver *resolver, const char *nam
   if (resolver == NULL || name == NULL) return NULL;
 
   ElfImg *img = (ElfImg *)resolver;
-
-  if (!prefix) {
-    void *exported = dlsym(RTLD_DEFAULT, name);
-    if (exported != NULL) return exported;
-  }
 
   size_t name_len = strlen(name);
   if (name_len == 0) return NULL;

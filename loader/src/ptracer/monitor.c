@@ -791,24 +791,32 @@ void sigchld_listener_callback() {
 
             if (tracer == NULL) break;
 
-            if (should_stop_inject()) {
-              LOGW("%s restart too many times, stop injecting", is_tango ? "Tango" : "Zygote" MONITOR_ABI);
+            /* INFO: Crash-loop accounting and daemon creation are zygote
+                     matters. The spawner has its own lifecycle and execs on
+                     its own schedule; counting those execs like zygote
+                     restarts would trip the crash-loop stop after a burst of
+                     app launches, and re-ensuring the daemon from here is
+                     what the zygote injection already did. */
+            if (!is_spawner) {
+              if (should_stop_inject()) {
+                LOGW("%s restart too many times, stop injecting", is_tango ? "Tango" : "Zygote" MONITOR_ABI);
 
-              tracing_state = STOPPING;
-              monitor_stop_reason = "Zygote crashed";
-              ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+                tracing_state = STOPPING;
+                monitor_stop_reason = "Zygote crashed";
+                ptrace(PTRACE_INTERRUPT, 1, 0, 0);
 
-              break;
-            }
+                break;
+              }
 
-            if (!ensure_daemon_created()) {
-              LOGW("VexZygiskd%s not running, stop injecting", MONITOR_ABI);
+              if (!ensure_daemon_created()) {
+                LOGW("VexZygiskd%s not running, stop injecting", MONITOR_ABI);
 
-              tracing_state = STOPPING;
-              monitor_stop_reason = "VexZygiskd not running";
-              ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+                tracing_state = STOPPING;
+                monitor_stop_reason = "VexZygiskd not running";
+                ptrace(PTRACE_INTERRUPT, 1, 0, 0);
 
-              break;
+                break;
+              }
             }
 
             LOGD("Stopping %d (program: %s, tracer: %s, tango: %s)", pid, program, tracer, is_tango ? "yes" : "no");

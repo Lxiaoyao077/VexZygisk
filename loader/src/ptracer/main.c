@@ -4,6 +4,7 @@
 
 #include <limits.h>
 
+#include <sys/ptrace.h>
 #include <signal.h>
 
 #include "daemon.h"

@@ -55,12 +55,15 @@ VexZygisk speaks the Zygisk Next API, so modules written against it — recent L
 |-----------------|----------------------------------------|
 | `Android NDK`   | Native Development Kit for Android     |
 
-### C Dependencies
+### C/C++ Dependencies
 
-| Dependency  | Description                   |
-|-------------|-------------------------------|
-| `PLTI`      | Simple PLT Hook for Android   |
-| `CSOLoader` | SOTA Linux custom linker      |
+| Dependency        | Description                                              |
+|-------------------|----------------------------------------------------------|
+| `PLTI`            | Simple PLT Hook for Android, used by the injector itself |
+| `LSPlt`           | PLT hooking library for Android, serves the ZN `pltHook` API |
+| `Dobby`           | In-process inline hooking engine, serves the ZN `inlineHook` API |
+| `CSOLoader`       | Custom ELF loader, maps standard Zygisk modules          |
+| `xz-embedded`     | XZ decompression for ELF `.gnu_debugdata`                |
 
 ## Installation
 
@@ -115,6 +118,25 @@ If something is not working, open an [Issue](https://github.com/Lxiaoyao077/VexZ
 ## Contribution
 
 Pull requests are welcome. Keep the existing code style and test your changes with a `debug` build before submitting.
+
+## Credits & Acknowledgements
+
+This repository stands on other projects' work; the credits below map the
+pieces to their sources.
+
+* [ReZygisk](https://github.com/PerformanC/ReZygisk): The base project this repository forks and rewrites in C
+* [NyaZygisk](https://github.com/HSSkyBoy/NyaZygisk): The HyperOS Runtime support (hyos_spawner interception, the runtime table, the fork and SELinux hooks that deliver `onAppSpecialized`) and the Zygisk Next fixes ported from here — symbol lookup confined to the library's own tables, `pltHook` backup semantics, the monitor's spawner handling and the upgrade-time `module.prop` guard
+* [ZygiskNext](https://github.com/Dr-TSNG/ZygiskNext): The original Zygisk Next module architecture and the API VexZygisk speaks
+* [ZygiskNextNext](https://github.com/VeryBaaad/ZygiskNextNext): Reference implementation for the standalone Zygisk Next API
+* [Magisk](https://github.com/topjohnwu/Magisk): The foundation of modern Android root and Zygisk itself
+* [OnyxZygisk](https://github.com/OnyxZygisk/OnyxZygisk): The revert-only zygote mount model this project follows
+* [KernelSU](https://github.com/tiann/KernelSU): The kernel interface the KernelSU flavour talks to
+* [APatch](https://github.com/bmax121/APatch): The kernel patch that the APatch flavour manages alongside
+* [Dobby](https://github.com/LSPosed/Dobby): In-process code hooking engine behind the ZN `inlineHook` API
+* [LSPlt](https://github.com/LSPosed/LSPlt): PLT hooking library behind the ZN `pltHook` API
+* [PLTI](https://github.com/PerformanC/PLTI): PLT hooking used by the injector itself
+* [CSOLoader](https://github.com/ThePedroo/CSOLoader): The custom ELF loader that maps standard Zygisk modules
+* [xz-embedded](https://tukaani.org/xz/embedded.html): Public-domain XZ decompressor for `.gnu_debugdata`
 
 ## License
 

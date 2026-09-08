@@ -4,12 +4,12 @@
 Each file is a minimal ELF whose only symbol table lives in a compressed
 .gnu_debugdata section, which is what a stripped system library looks like.
 Finding a symbol in it therefore exercises exactly one path: locating the
-section, decompressing the LZMA1 stream, and parsing the ELF that comes out.
+section, decompressing the XZ stream, and parsing the ELF that comes out.
 
 Two layouts are produced because Android prepends a four byte CRC32 that the
 GNU toolchain leaves out, and the loader has to cope with both:
 
-  <output>-plain.elf  raw LZMA1 "alone" stream
+  <output>-plain.elf  raw XZ stream
   <output>-crc.elf    four byte CRC32 in front of the stream
 
 Usage: python make_debugdata.py <output-prefix>
@@ -113,38 +113,10 @@ def build_inner(names, offsets):
     return ehdr + strtab + bytes(symtab) + shstrtab + shdrs
 
 
-# The encoder parameters, written out explicitly so the header built below
-# always matches the stream the compressor produces. These are liblzma's
-# defaults and the ones LzmaDecode expects unless told otherwise.
-LC = 3
-LP = 0
-PB = 2
-DICT_SIZE = 1 << 20
-
-
-def encode_lzma1_props():
-    """The five byte property header of an LZMA1 "alone" stream.
-
-    Built here instead of with lzma.encode_filter_properties, which is missing
-    from some Python builds. The layout is the one LzmaDecode reads back:
-    one byte packing lc, lp and pb, then the dictionary size.
-    """
-    return bytes([(PB * 5 + LP) * 9 + LC]) + struct.pack("<I", DICT_SIZE)
-
-
-def compress_alone(payload):
-    """An LZMA1 "alone" stream: props(5), uncompressed size(8), then data.
-
-    Built by hand rather than with FORMAT_ALONE: that writes the size field
-    before it can know the length, so it stores the "unknown" marker, which
-    the loader rejects on purpose.
-    """
-    filters = [{"id": lzma.FILTER_LZMA1, "dict_size": DICT_SIZE,
-                "lc": LC, "lp": LP, "pb": PB}]
-    compressor = lzma.LZMACompressor(format=lzma.FORMAT_RAW, filters=filters)
-    body = compressor.compress(payload) + compressor.flush()
-
-    return encode_lzma1_props() + struct.pack("<Q", len(payload)) + body
+def compress_xz(payload):
+    """An XZ stream, the container .gnu_debugdata actually ships in: LZMA2
+    inside the XZ framing. The default preset is fine for a few kilobytes."""
+    return lzma.compress(payload)
 
 
 def build_outer(debugdata):
@@ -183,7 +155,7 @@ def main():
     names = [name for name, _, _, _ in SYMBOLS]
     _, offsets = build_string_table(names)
     inner = build_inner(names, offsets)
-    stream = compress_alone(inner)
+    stream = compress_xz(inner)
 
     variants = {
         "-plain.elf": stream,

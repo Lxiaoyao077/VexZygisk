@@ -36,12 +36,25 @@ jobs:
              -Iloader/src/external/lzma \
              -c loader/src/common/elf_util.c -o /tmp/elf_util.o
           cc -std=c18 -D_GNU_SOURCE -w \
+             -DXZ_DEC_DYNALLOC=1 -DXZ_DEC_ANY_CHECK=1 -DXZ_INTERNAL_CRC32=1 \
+             -DNOINLINE=noinline_for_stack \
              -Iloader/src/external/lzma \
-             -c loader/src/external/lzma/LzmaDec.c -o /tmp/lzma_dec.o
+             -c loader/src/external/lzma/xz_dec_lzma2.c -o /tmp/xz_lzma2.o
+          cc -std=c18 -D_GNU_SOURCE -w \
+             -DXZ_DEC_DYNALLOC=1 -DXZ_DEC_ANY_CHECK=1 -DXZ_INTERNAL_CRC32=1 \
+             -DNOINLINE=noinline_for_stack \
+             -Iloader/src/external/lzma \
+             -c loader/src/external/lzma/xz_dec_stream.c -o /tmp/xz_stream.o
+          cc -std=c18 -D_GNU_SOURCE -w \
+             -DXZ_DEC_DYNALLOC=1 -DXZ_DEC_ANY_CHECK=1 -DXZ_INTERNAL_CRC32=1 \
+             -DNOINLINE=noinline_for_stack \
+             -Iloader/src/external/lzma \
+             -c loader/src/external/lzma/xz_dec_bcj.c -o /tmp/xz_bcj.o
           cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
              -Itests/host -Iloader/src/include -Iloader/src/common \
              -Iloader/src/external/lzma \
-             tests/host/test_elf_util.c /tmp/elf_util.o /tmp/lzma_dec.o \
+             tests/host/test_elf_util.c /tmp/elf_util.o /tmp/xz_lzma2.o \
+             /tmp/xz_stream.o /tmp/xz_bcj.o \
              -o /tmp/test_elf_util
           python3 tests/host/make_debugdata.py /tmp/debugdata
           /tmp/test_elf_util /tmp/debugdata /tmp/test_elf_util

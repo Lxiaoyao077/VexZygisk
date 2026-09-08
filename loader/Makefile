@@ -216,13 +216,20 @@ $(OBJ_DIR)/ptracer/%.o: src/ptracer/%.c
 	$(CC_ARCH) $(NDK_CFLAGS) $(LOADER_CFLAGS) $(TYPE_CFLAGS) \
 		$(COMMON_INCLUDES) -fPIE -c $< -o $@
 
-LZMA_OBJ = $(OBJ_DIR)/external/lzma/LzmaDec.o
+# INFO: xz-embedded, built the way its own build does: dynamic allocation for
+#       the dictionary, every integrity check accepted and its internal CRC32
+#       instead of a kernel one.
+LZMA_CFLAGS = -D_GNU_SOURCE -std=c11 -fno-stack-protector -fomit-frame-pointer \
+	-Wno-unused -Wno-sign-compare -DNDEBUG \
+	-DXZ_DEC_DYNALLOC=1 -DXZ_DEC_ANY_CHECK=1 -DXZ_INTERNAL_CRC32=1 \
+	-DNOINLINE=noinline_for_stack
 
-$(LZMA_OBJ): $(LZMA_DIR)/LzmaDec.c
+LZMA_SRCS = xz_dec_lzma2.c xz_dec_stream.c xz_dec_bcj.c
+LZMA_OBJS = $(patsubst %.c,$(OBJ_DIR)/external/lzma/%.o,$(LZMA_SRCS))
+
+$(LZMA_OBJS): $(OBJ_DIR)/external/lzma/%.o: $(LZMA_DIR)/%.c
 	@mkdir -p $(dir $@)
-	$(CC_ARCH) $(NDK_CFLAGS) -D_GNU_SOURCE -std=c11 -fno-stack-protector  \
-		-fomit-frame-pointer -Wno-unused -Wno-sign-compare -DNDEBUG       \
-		$(COMMON_INCLUDES) -fPIC -c $< -o $@
+	$(CC_ARCH) $(NDK_CFLAGS) $(LZMA_CFLAGS) $(COMMON_INCLUDES) -fPIC -c $< -o $@
 
 $(LIBCOMMON): $(COMMON_OBJS) $(LZMA_OBJ)
 	@mkdir -p $(dir $@)

@@ -15,72 +15,85 @@
 
 #include "elf_util.h"
 
-#include "LzmaDec.h"
+#include "xz.h"
 
-/* INFO: Mini-debug info (.gnu_debugdata) support. The section carries an
-          LZMA1 "alone" stream that decompresses into a small ELF holding a
-          full .symtab for otherwise stripped libraries. */
+/* INFO: Mini-debug info (.gnu_debugdata) support. The section holds an XZ
+          stream (LZMA2 inside the XZ container) that decompresses into a
+          small ELF carrying the full .symtab of an otherwise stripped
+          library. LZMA1 "alone" streams are not decodable here: the container
+          differs and the toolchains that emit mini-debug info produce XZ. */
 
-static void *lzma_alloc(ISzAllocPtr p, size_t size) {
-  (void) p;
+/* INFO: The stream carries no uncompressed size a reader can trust ahead of
+          decoding, so the output grows on demand. 64 MiB is the same cap the
+          alone-stream decoder used and far above any real payload. */
+#define XZ_DICT_LIMIT (1u << 26)
+#define XZ_OUT_LIMIT (64u << 20)
 
-  return malloc(size);
-}
+static bool xz_decompress(const uint8_t *in, size_t in_size, uint8_t **out_buf, size_t *out_size) {
+  struct xz_dec *decoder = xz_dec_init(XZ_DYNALLOC, XZ_DICT_LIMIT);
+  if (decoder == NULL) return false;
 
-static void lzma_free(ISzAllocPtr p, void *addr) {
-  (void) p;
+  size_t capacity = 64u << 10;
+  uint8_t *out = (uint8_t *)malloc(capacity);
+  if (out == NULL) {
+    xz_dec_end(decoder);
 
-  free(addr);
-}
+    return false;
+  }
 
-static const ISzAlloc lzma_alloc_vt = { lzma_alloc, lzma_free };
+  struct xz_buf buffer = {
+    .in = in,
+    .in_pos = 0,
+    .in_size = in_size,
+    .out = out,
+    .out_pos = 0,
+    .out_size = capacity
+  };
 
-/* INFO: Stream layout: props (1 byte) + dict size (4 bytes LE) +
-          uncompressed size (8 bytes LE) + payload. */
-static bool lzma_alone_decompress(const uint8_t *in, size_t in_size, uint8_t **out_buf, size_t *out_size) {
-  if (in_size < 13) return false;
+  enum xz_ret result = XZ_OK;
 
-  uint64_t expected = 0;
-  for (int i = 0; i < 8; i++) expected |= (uint64_t)in[5 + i] << (8 * i);
+  while (result == XZ_OK && buffer.out_pos == buffer.out_size) {
+    if (capacity >= XZ_OUT_LIMIT) break;
 
-  /* INFO: 64 MiB is far above any real mini-debug payload and keeps a
-            corrupted header from turning into a huge allocation. */
-  if (expected == 0 || expected == UINT64_MAX || expected > (64u << 20)) return false;
+    size_t bigger = capacity * 2;
+    uint8_t *grown = (uint8_t *)realloc(out, bigger);
+    if (grown == NULL) break;
 
-  uint8_t *out = (uint8_t *)malloc(expected);
-  if (!out) return false;
+    out = grown;
+    capacity = bigger;
+    buffer.out = out;
+    buffer.out_size = capacity;
 
-  SizeT dest_len = (SizeT)expected;
-  SizeT src_len = (SizeT)(in_size - 13);
-  ELzmaStatus status;
+    result = xz_dec_run(decoder, &buffer);
+  }
 
-  SRes res = LzmaDecode(out, &dest_len, in + 13, &src_len, (const Byte *)in, 5,
-                        LZMA_FINISH_END, &status, &lzma_alloc_vt);
-
-  if (res != SZ_OK) {
+  if (result != XZ_STREAM_END) {
+    xz_dec_end(decoder);
     free(out);
 
     return false;
   }
 
+  xz_dec_end(decoder);
+
   *out_buf = out;
-  *out_size = dest_len;
+  *out_size = buffer.out_pos;
 
   return true;
 }
 
 static bool parse_gnu_debugdata(ElfImg *img, const uint8_t *data, size_t size) {
-  /* INFO: Android prepends a 4-byte CRC32 before the LZMA stream while the
-            GNU toolchain emits the raw stream, so both layouts are tried. */
+  /* INFO: The GNU toolchain emits the raw XZ stream while Android prefixes a
+            4-byte CRC32, so both positions are tried. */
   static const size_t kOffsets[] = { 4, 0 };
 
   for (size_t i = 0; i < sizeof(kOffsets) / sizeof(kOffsets[0]); i++) {
     size_t off = kOffsets[i];
-    if (size <= off + 13) continue;
+    if (size <= off + 8) continue;
 
     uint8_t *out = NULL;
     size_t out_size = 0;
-    if (!lzma_alone_decompress(data + off, size - off, &out, &out_size)) continue;
+    if (!xz_decompress(data + off, size - off, &out, &out_size)) continue;
     if (out_size < sizeof(ElfW(Ehdr)) || memcmp(out, ELFMAG, SELFMAG) != 0) {
       free(out);
 

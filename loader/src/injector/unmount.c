@@ -249,38 +249,35 @@ static bool abort_zygote_unmount(const struct mount_list *traces) {
   return false;
 }
 
-/* INFO: Escape hatch for setups where a metamodule owns the mounting. A
-         metamodule replaces KernelSU's own mounting and can hang content a
-         regular module expects to find at runtime (themes, fonts, overlays)
-         on mounts that look exactly like a module's to this code. Dropping
-         the marker file next to the module turns the revert off and leaves
-         the namespace fallback in charge, which is the behaviour every other
-         Zygisk implementation has. */
-static bool zygote_revert_disabled(void) {
-  static int disabled = -1;
+/* INFO: The revert is off unless a device opts in. A metamodule owns the
+         mounting on KernelSU, and what it hangs there (themes, fonts,
+         overlays) is indistinguishable from a module mount to the trace
+         selection below: modules that rely on those mounts stopped working
+         while the revert was on. Dropping an enable-revert marker next to the
+         module turns it back on; the namespace fallback does the isolating
+         otherwise, which is what every other Zygisk implementation does. */
+static bool zygote_revert_enabled(void) {
+  static int enabled = -1;
 
-  if (disabled == -1) {
+  if (enabled == -1) {
     struct stat st;
 
     /* INFO: Both locations are checked because which one the zygote can
               actually see depends on the label the root solution gives
               /data/adb on that device. */
-    disabled = stat("/data/adb/rezygisk/disable-revert", &st) == 0 ||
-               stat("/data/adb/modules/rezygisk/disable-revert", &st) == 0;
+    enabled = stat("/data/adb/rezygisk/enable-revert", &st) == 0 ||
+              stat("/data/adb/modules/rezygisk/enable-revert", &st) == 0;
   }
 
-  return disabled == 1;
+  return enabled == 1;
 }
 
 bool zygote_mounts_revert(void) {
   if (g_zygote_reverted) return true;
   if (g_zygote_revert_refused) return false;
 
-  if (zygote_revert_disabled()) {
-    /* INFO: Logged at info level on purpose: this is the one line that tells
-              a device whether the revert ran or not, and debug logs are
-              compiled out of a release build. */
-    LOGI("Zygote revert is disabled, leaving the mounts alone");
+  if (!zygote_revert_enabled()) {
+    LOGD("Zygote revert is off, leaving the mounts alone");
 
     return false;
   }

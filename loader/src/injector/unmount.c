@@ -262,7 +262,11 @@ static bool zygote_revert_disabled(void) {
   if (disabled == -1) {
     struct stat st;
 
-    disabled = stat("/data/adb/modules/rezygisk/disable-revert", &st) == 0;
+    /* INFO: Both locations are checked because which one the zygote can
+              actually see depends on the label the root solution gives
+              /data/adb on that device. */
+    disabled = stat("/data/adb/rezygisk/disable-revert", &st) == 0 ||
+               stat("/data/adb/modules/rezygisk/disable-revert", &st) == 0;
   }
 
   return disabled == 1;
@@ -273,7 +277,10 @@ bool zygote_mounts_revert(void) {
   if (g_zygote_revert_refused) return false;
 
   if (zygote_revert_disabled()) {
-    LOGV("Zygote revert is disabled, leaving the mounts alone");
+    /* INFO: Logged at info level on purpose: this is the one line that tells
+              a device whether the revert ran or not, and debug logs are
+              compiled out of a release build. */
+    LOGI("Zygote revert is disabled, leaving the mounts alone");
 
     return false;
   }

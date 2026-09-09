@@ -17,7 +17,7 @@ The Zygisk Next developers are famous and trusted in the Android community, howe
 - FOSS (Forever)
 - Zygisk Next module support
 - KernelSU **and** APatch support, as dedicated builds
-- Mounts reverted straight from zygote by default, with no extra daemon processes
+- Denylist handled by a cached clean namespace, with no extra daemon processes
 
 ## Root solution support
 
@@ -34,12 +34,34 @@ Each archive targets exactly one root solution and refuses to install from anyth
 
 ## Mount handling
 
-VexZygisk reverts the root and module mounts from zygote itself, once, before the first fork (the same approach OnyxZygisk calls *revert only*). Every process forked afterwards inherits a view that never had those mounts, so denylisted apps need no namespace switch and the daemon does not need to keep a clean namespace alive in a helper process.
+Denylisted processes are switched into a cached clean namespace, the way every
+other Zygisk implementation does it: zygote keeps a namespace without the root
+and module mounts, a denylisted app is switched into it, and everything else
+keeps the ordinary view.
 
-The classic approach — switching denylisted processes into a cached clean namespace — stays as the automatic fallback for the cases where reverting is refused (for example when an exact `/product` mount is among the traces, which some ROMs overlay with zygote resources). A refusal is decided once: the namespace fallback then stays in place for the rest of that zygote's life instead of re-parsing mountinfo before every fork.
+VexZygisk can also revert the mounts from zygote itself, once, before the first
+fork — the approach OnyxZygisk calls *revert only* — which leaves every
+process forked afterwards with a view that never had those mounts, so no
+namespace switch is needed at all. It is **off by default**:
 
-> [!NOTE]
-> Because the module tree is unmounted from zygote itself, a module that reaches for its own files through a hardcoded `/data/adb/modules/<id>/...` path will not find them after the revert. Modules that need their files should go through the Zygisk API's module directory handle; that is the contract every Zygisk provider expects, and it is the one behavioural difference this mode has.
+> [!WARNING]
+> Reverting breaks modules that depend on a metamodule's mounts. On KernelSU the
+> metamodule owns all module mounting, and what it hangs there — themes, fonts,
+> overlays — is indistinguishable from a module mount to the trace selection, so
+> those mounts get reverted along with the rest and the modules stop working.
+> Until the selection can tell them apart, enable it only if you know your setup
+> does not rely on mounted modules.
+
+Enable it by dropping a marker next to the module and rebooting:
+
+```sh
+touch /data/adb/rezygisk/enable-revert   # or /data/adb/modules/rezygisk/enable-revert
+```
+
+Reverting is also skipped, and the namespace fallback used instead, when an
+exact `/product` mount is among the traces, which some ROMs overlay with zygote
+resources. That refusal is decided once, so mountinfo is not re-parsed before
+every fork.
 
 ## Zygisk Next support
 
@@ -129,7 +151,7 @@ pieces to their sources.
 * [ZygiskNext](https://github.com/Dr-TSNG/ZygiskNext): The original Zygisk Next module architecture and the API VexZygisk speaks
 * [ZygiskNextNext](https://github.com/VeryBaaad/ZygiskNextNext): Reference implementation for the standalone Zygisk Next API
 * [Magisk](https://github.com/topjohnwu/Magisk): The foundation of modern Android root and Zygisk itself
-* [OnyxZygisk](https://github.com/OnyxZygisk/OnyxZygisk): The revert-only zygote mount model this project follows
+* [OnyxZygisk](https://github.com/OnyxZygisk/OnyxZygisk): The revert-only zygote mount model VexZygisk implements as an opt-in
 * [KernelSU](https://github.com/tiann/KernelSU): The kernel interface the KernelSU flavour talks to
 * [APatch](https://github.com/bmax121/APatch): The kernel patch that the APatch flavour manages alongside
 * [Dobby](https://github.com/LSPosed/Dobby): In-process code hooking engine behind the ZN `inlineHook` API

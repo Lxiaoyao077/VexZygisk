@@ -313,6 +313,13 @@ DCL_HOOK_FUNC(void, _ZNK18FileDescriptorInfo14ReopenOrDetach, void *_this, void 
   const char *file_path = read_std_string(file_path_std_string);
   const bool is_sock = *(const bool *)((uintptr_t)_this + offsetof(struct FileDescriptorInfo, is_sock));
 
+  /* INFO: read_std_string() may return NULL for a moved-from or otherwise
+           malformed std::string; dereferencing it below would crash the fd
+           sanitization hook on every fork. Treat a missing path as "cannot
+           verify, leave the fd alone" and defer to the original. */
+  if (file_path == NULL)
+    goto bypass_fd_check;
+
   if (is_sock)
     goto bypass_fd_check;
 
@@ -1485,6 +1492,17 @@ void hook_functions(void) {
 }
 
 static void hook_unloader(void) {
+  /* INFO: Run the expensive setup (PLT unregister + module load) at most once,
+           but keep retrying until libart.so is actually mapped: the first
+           property_get calls can land before the runtime is loaded, in which
+           case plti_add_lib fails and we must try again on a later call.
+           The flag is set only after a successful setup, so the one-shot
+           guarantee no longer depends solely on the plti unregister side-effect
+           and is safe under re-entrancy (e.g. the HyperOS spawner forking in
+           parallel). */
+  static bool installed = false;
+  if (installed) return;
+
   if (!plti_add_lib(&plti_ctx, "libart.so")) {
     LOGE("Failed to add libart.so to PLTI");
 
@@ -1500,6 +1518,7 @@ static void hook_unloader(void) {
     LOGE("Failed to load modules in hook_unloader");
   }
 
+  installed = true;
   LOGD("VexZygisk unloader hooked successfully");
 }
 

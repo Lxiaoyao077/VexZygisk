@@ -73,6 +73,7 @@ static inline bool amethod_init(JNIEnv *env) {
     LOGE("Failed to find Class.getDeclaredConstructors");
 
     if (clazz) (*env)->DeleteLocalRef(env, clazz);
+    (*env)->DeleteLocalRef(env, throwable);
 
     return false;
   }
@@ -83,6 +84,7 @@ static inline bool amethod_init(JNIEnv *env) {
     LOGE("Throwable has less than 2 constructors");
 
     if (clazz) (*env)->DeleteLocalRef(env, clazz);
+    if (constructors) (*env)->DeleteLocalRef(env, constructors);
 
     return false;
   }

@@ -110,7 +110,7 @@ void ksu_uid_query_root(uid_t uid, bool *granted_root, bool *should_umount) {
 }
 
 bool ksu_uid_is_manager(uid_t uid) {
-  struct ksu_get_manager_uid_cmd cmd;
+  struct ksu_get_manager_uid_cmd cmd = { 0 };
   if (ioctl(ksu_fd, KSU_IOCTL_GET_MANAGER_UID, &cmd) == -1) {
     LOGE("Failed to ioctl KSU_IOCTL_GET_MANAGER_UID: %s\n", strerror(errno));
 

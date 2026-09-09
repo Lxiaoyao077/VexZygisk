@@ -242,6 +242,11 @@ struct maps_info *parse_maps_safe(const char *pid) {
 
     close(sockets[0]);
 
+    /* INFO: The child is blocked on the can-kill byte; closing the socket
+             makes its read fail and it exits, so reap it here or it stays a
+             zombie under the long-lived monitor. */
+    waitpid(ppid, NULL, 0);
+
     return NULL;
   }
 
@@ -251,6 +256,10 @@ struct maps_info *parse_maps_safe(const char *pid) {
 
     close(fd);
     close(sockets[0]);
+
+    /* INFO: Same as above: the child never gets its can-kill byte on this
+             path, so the closed socket lets it exit and this reaps it. */
+    waitpid(ppid, NULL, 0);
 
     return NULL;
   }

@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
 #include <sys/sysmacros.h>
 
 #include "logging.h"
@@ -248,9 +249,34 @@ static bool abort_zygote_unmount(const struct mount_list *traces) {
   return false;
 }
 
+/* INFO: Escape hatch for setups where a metamodule owns the mounting. A
+         metamodule replaces KernelSU's own mounting and can hang content a
+         regular module expects to find at runtime (themes, fonts, overlays)
+         on mounts that look exactly like a module's to this code. Dropping
+         the marker file next to the module turns the revert off and leaves
+         the namespace fallback in charge, which is the behaviour every other
+         Zygisk implementation has. */
+static bool zygote_revert_disabled(void) {
+  static int disabled = -1;
+
+  if (disabled == -1) {
+    struct stat st;
+
+    disabled = stat("/data/adb/modules/rezygisk/disable-revert", &st) == 0;
+  }
+
+  return disabled == 1;
+}
+
 bool zygote_mounts_revert(void) {
   if (g_zygote_reverted) return true;
   if (g_zygote_revert_refused) return false;
+
+  if (zygote_revert_disabled()) {
+    LOGV("Zygote revert is disabled, leaving the mounts alone");
+
+    return false;
+  }
 
   struct mount_list all = { 0 };
   if (!mount_list_parse("/proc/self/mountinfo", &all)) {

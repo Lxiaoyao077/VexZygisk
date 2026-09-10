@@ -75,67 +75,6 @@
             "q12","q13","q14","q15"
     );
   }
-#elif defined(__x86_64__)
-  /* INFO: In x64, we clear the following registers:
-             SSE: xmm0, xmm1, ..., xmm15
-             GPR: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
-  */
-  __attribute__((always_inline))
-  static inline void registers_clear(void) {
-    __asm__ volatile(
-      "xor %%rax, %%rax\n"
-      "xor %%rcx, %%rcx\n"
-      "xor %%rdx, %%rdx\n"
-      "xor %%rsi, %%rsi\n"
-      "xor %%rdi, %%rdi\n"
-      "xor %%r8, %%r8\n"
-      "xor %%r9, %%r9\n"
-      "xor %%r10, %%r10\n"
-      "xor %%r11, %%r11\n"
-      "xorps %%xmm0, %%xmm0\n"
-      "xorps %%xmm1, %%xmm1\n"
-      "xorps %%xmm2, %%xmm2\n"
-      "xorps %%xmm3, %%xmm3\n"
-      "xorps %%xmm4, %%xmm4\n"
-      "xorps %%xmm5, %%xmm5\n"
-      "xorps %%xmm6, %%xmm6\n"
-      "xorps %%xmm7, %%xmm7\n"
-      "xorps %%xmm8, %%xmm8\n"
-      "xorps %%xmm9, %%xmm9\n"
-      "xorps %%xmm10, %%xmm10\n"
-      "xorps %%xmm11, %%xmm11\n"
-      "xorps %%xmm12, %%xmm12\n"
-      "xorps %%xmm13, %%xmm13\n"
-      "xorps %%xmm14, %%xmm14\n"
-      "xorps %%xmm15, %%xmm15\n"
-      : : : "rax","rcx","rdx","rsi","rdi","r8","r9","r10","r11",
-            "xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7",
-            "xmm8","xmm9","xmm10","xmm11","xmm12","xmm13","xmm14","xmm15"
-    );
-  }
-#elif defined(__i386__)
-  /* INFO: In x86 (32-bit), only 32-bit GPRs and xmm0..xmm7 exist.
-             GPR: eax, ecx, edx (caller-saved)
-             SSE: xmm0, xmm1, ..., xmm7
-  */
-  __attribute__((always_inline))
-  static inline void registers_clear(void) {
-    __asm__ volatile(
-      "xor %%eax, %%eax\n"
-      "xor %%ecx, %%ecx\n"
-      "xor %%edx, %%edx\n"
-      "xorps %%xmm0, %%xmm0\n"
-      "xorps %%xmm1, %%xmm1\n"
-      "xorps %%xmm2, %%xmm2\n"
-      "xorps %%xmm3, %%xmm3\n"
-      "xorps %%xmm4, %%xmm4\n"
-      "xorps %%xmm5, %%xmm5\n"
-      "xorps %%xmm6, %%xmm6\n"
-      "xorps %%xmm7, %%xmm7\n"
-      : : : "eax","ecx","edx",
-            "xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7"
-    );
-  }
 #endif
 
 #endif /* REGISTERS_H */

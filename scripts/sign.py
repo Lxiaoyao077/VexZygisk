@@ -164,7 +164,7 @@ def main():
     print("No private_key and public_key found, this build will not be signed")
 
     # INFO: Create empty machikado files
-    for name in ["machikado.arm64", "machikado.arm", "machikado.x86_64", "machikado.x86"]:
+    for name in ["machikado.arm64", "machikado.arm"]:
       (root / name).touch()
 
     # INFO: Compute SHA256 hashes
@@ -188,8 +188,6 @@ def main():
   # INFO: Sign machikado for each architecture
   sign_machikado(module_dir, "machikado.arm64", "arm64-v8a", True, private_key_bytes, public_key_bytes)
   sign_machikado(module_dir, "machikado.arm", "armeabi-v7a", False, private_key_bytes, public_key_bytes)
-  sign_machikado(module_dir, "machikado.x86_64", "x86_64", True, private_key_bytes, public_key_bytes)
-  sign_machikado(module_dir, "machikado.x86", "x86", False, private_key_bytes, public_key_bytes)
 
   # INFO: Compute SHA256 hashes for all files (including machikado)
   compute_sha256_hashes(module_dir)

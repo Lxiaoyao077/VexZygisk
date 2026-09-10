@@ -17,17 +17,7 @@
 
 #include "logging.h"
 
-#if defined(__x86_64__)
-  #define REG_SP rsp
-  #define REG_IP rip
-  #define REG_RET rax
-  #define REG_SYSNR orig_rax
-#elif defined(__i386__)
-  #define REG_SP esp
-  #define REG_IP eip
-  #define REG_RET eax
-  #define REG_SYSNR orig_eax
-#elif defined(__aarch64__)
+#if defined(__aarch64__)
   #define REG_SP sp
   #define REG_IP pc
   #define REG_RET regs[0]

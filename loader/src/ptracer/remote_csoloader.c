@@ -533,19 +533,6 @@ static bool apply_rela_section(int pid, int fd, const struct elf_dyn_info *info,
 
         return false;
       }
-    #elif defined(__x86_64__)
-      if (type == R_X86_64_RELATIVE) {
-        value = (ElfW(Addr))load_bias + (ElfW(Addr))r.r_addend;
-      } else if (type == R_X86_64_GLOB_DAT || type == R_X86_64_JUMP_SLOT || type == R_X86_64_64) {
-        uintptr_t sym_addr = 0;
-        if (!resolve_symbol_addr(fd, info, local_map, remote_map, needed_paths, load_bias, sym, &sym_addr))
-          return false;
-
-        value = sym_addr ? (ElfW(Addr))sym_addr + (ElfW(Addr))r.r_addend : 0;
-      } else {
-        LOGE("Unsupported x86_64 RELA type %u", type);
-        return false;
-      }
     #else
       (void) info; (void) local_map; (void) remote_map; (void) sym; (void) type; (void) needed_paths;
 

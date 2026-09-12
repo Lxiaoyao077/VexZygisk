@@ -781,6 +781,52 @@ bool parse_mountinfo(const char *restrict pid, struct mountinfos *restrict mount
   #define ROOT_SOURCE_COUNT 1
 #endif
 
+/* INFO: The same three shapes the loader's revert looks for, so a clean
+         namespace and a reverted zygote drop the same set of mounts: KernelSU
+         puts its modules on a loop device whose name becomes the source of
+         every module mount, and both root solutions bind their trees in below
+         /adb/modules. */
+#define MOUNT_SOURCE_LOOP "/dev/block/loop"
+#define KSU_MODULES_DIR "/data/adb/modules"
+#define KSU_MODULES_ROOT "/adb/modules"
+
+/* INFO: True when `path` equals `prefix` or sits directly underneath it (the
+         next byte is '/'). A bare prefix test would also match a sibling such
+         as /data/adb/modules_extra, which must never be unmounted. */
+static bool mount_path_at_or_under(const char *path, const char *prefix) {
+  size_t len = strlen(prefix);
+
+  if (strncmp(path, prefix, len) != 0) return false;
+
+  char next = path[len];
+
+  return next == '\0' || next == '/';
+}
+
+/* INFO: KernelSU keeps its modules on a loop device, and that device name
+         shows up as the source of every module mount. APatch overlays them
+         instead, so only the KernelSU flavour looks for it. Without this the
+         clean namespace would miss every mount whose source is the loop
+         device rather than the "KSU" overlay name. */
+static const char *find_module_loop_source(const struct mountinfos *all) {
+#ifndef ROOT_IMPL_APATCH
+  for (size_t i = 0; i < all->length; i++) {
+    const struct mountinfo *info = &all->mounts[i];
+
+    if (strcmp(info->target, KSU_MODULES_DIR) == 0 &&
+        strncmp(info->source, MOUNT_SOURCE_LOOP, strlen(MOUNT_SOURCE_LOOP)) == 0) {
+      LOGD("Detected the KernelSU module loop source: %s", info->source);
+
+      return info->source;
+    }
+  }
+#else
+  (void) all;
+#endif
+
+  return NULL;
+}
+
 bool umount_root(void) {
   /* INFO: This runs in a child that already setns'ed into the target pid's
             mount namespace, so "self" here is the namespace to clean. */
@@ -801,6 +847,10 @@ bool umount_root(void) {
   char **targets_to_unmount = NULL;
   size_t num_targets = 0;
 
+  /* INFO: loop_source borrows a string owned by `mounts`; it is only read
+           across the selection loop below, which runs before free_mounts. */
+  const char *loop_source = find_module_loop_source(&mounts);
+
   for (size_t i = 0; i < mounts.length; i++) {
     struct mountinfo mount = mounts.mounts[i];
 
@@ -808,8 +858,9 @@ bool umount_root(void) {
     for (size_t s = 0; s < ROOT_SOURCE_COUNT && !should_unmount; s++) {
       if (strcmp(mount.source, kRootSources[s]) == 0) should_unmount = true;
     }
-    if (strncmp(mount.target, "/data/adb/modules", strlen("/data/adb/modules")) == 0) should_unmount = true;
-    if (strncmp(mount.root, "/adb/modules/", strlen("/adb/modules/")) == 0) should_unmount = true;
+    if (mount_path_at_or_under(mount.target, KSU_MODULES_DIR)) should_unmount = true;
+    if (mount_path_at_or_under(mount.root, KSU_MODULES_ROOT)) should_unmount = true;
+    if (loop_source != NULL && strcmp(mount.source, loop_source) == 0) should_unmount = true;
 
     if (!should_unmount) continue;
 
@@ -832,7 +883,17 @@ bool umount_root(void) {
 
   for (size_t i = num_targets; i > 0; i--) {
     const char *target = targets_to_unmount[i - 1];
-    if (umount2(target, MNT_DETACH) == -1) {
+
+    /* INFO: A plain umount detaches the mount from the filesystem lookup as
+              well, while MNT_DETACH only takes it out of this namespace's
+              mount tree: the filesystem instance survives for whoever still
+              holds a reference, so a process can keep mapping files out of an
+              overlay that its own mountinfo no longer lists. That gap between
+              the mount list and what the paths resolve to is exactly what an
+              inconsistency check looks for, so the hard umount is tried first
+              and the lazy one stays as the fallback for mounts that are
+              genuinely still in use. */
+    if (umount2(target, 0) == -1 && umount2(target, MNT_DETACH) == -1) {
       LOGE("[%s] Failed to unmount %s: %s", source_name, target, strerror(errno));
 
       continue;

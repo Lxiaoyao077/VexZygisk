@@ -15,7 +15,6 @@
 #define KSU_MODULES_DIR "/data/adb/modules"
 #define KSU_MODULES_ROOT "/adb/modules"
 #define PRODUCT_MOUNT "/product"
-#define PRODUCT_BIN_MOUNT "/product/bin"
 
 /* INFO: The overlay mounts of each root solution carry its own source name:
          KernelSU reports "KSU" and APatch reports "APatch" or "kpatch". The
@@ -201,9 +200,22 @@ static const char *find_module_loop_source(const struct mount_list *all) {
   return NULL;
 }
 
+/* INFO: True when `path` equals `prefix` or sits directly underneath it (the
+         next byte is '/'). A bare prefix test would also match a sibling such
+         as /data/adb/modules_extra, which must never be reverted. */
+static bool mount_path_at_or_under(const char *path, const char *prefix) {
+  size_t len = strlen(prefix);
+
+  if (strncmp(path, prefix, len) != 0) return false;
+
+  char next = path[len];
+
+  return next == '\0' || next == '/';
+}
+
 static bool carries_root_trace(const struct mount_info *info, const char *loop_source) {
-  if (strncmp(info->root, KSU_MODULES_ROOT, strlen(KSU_MODULES_ROOT)) == 0) return true;
-  if (strncmp(info->target, KSU_MODULES_DIR, strlen(KSU_MODULES_DIR)) == 0) return true;
+  if (mount_path_at_or_under(info->root, KSU_MODULES_ROOT)) return true;
+  if (mount_path_at_or_under(info->target, KSU_MODULES_DIR)) return true;
 
   for (size_t i = 0; i < ROOT_SOURCE_COUNT; i++) {
     if (strcmp(info->source, kRootSources[i]) == 0) return true;
@@ -237,8 +249,6 @@ static bool abort_zygote_unmount(const struct mount_list *traces) {
   for (size_t i = 0; i < traces->len; i++) {
     const char *target = traces->items[i].target;
 
-    if (strncmp(target, PRODUCT_MOUNT, strlen(PRODUCT_MOUNT)) != 0) continue;
-    if (strncmp(target, PRODUCT_BIN_MOUNT, strlen(PRODUCT_BIN_MOUNT)) == 0) continue;
     if (strcmp(target, PRODUCT_MOUNT) != 0) continue;
 
     LOGW("Refusing to revert zygote, %s is mounted", target);
@@ -290,6 +300,9 @@ bool zygote_mounts_revert(void) {
   }
 
   struct mount_list traces = { 0 };
+  /* INFO: loop_source borrows a string owned by `all`; it is only consulted
+           across the selection loop below and must not be read after the
+           mount_list_free(&all) call that follows it. */
   const char *loop_source = find_module_loop_source(&all);
 
   for (size_t i = 0; i < all.len; i++) {
@@ -327,15 +340,24 @@ bool zygote_mounts_revert(void) {
   for (size_t i = 0; i < traces.len; i++) {
     const char *target = traces.items[i].target;
 
-    if (umount2(target, MNT_DETACH) == 0) {
-      LOGV("Reverted %s (mount id %u)", target, traces.items[i].id);
+    /* INFO: A plain umount detaches the mount from the filesystem lookup as
+              well, while MNT_DETACH only takes it out of this namespace's
+              mount tree: the filesystem instance survives for whoever still
+              holds a reference, so the apps forked afterwards can keep mapping
+              files out of an overlay that their own mountinfo no longer lists.
+              That gap between the mount list and what the paths resolve to is
+              exactly what an inconsistency check looks for, so the hard umount
+              goes first and the lazy one stays as the fallback for mounts that
+              are genuinely still in use. */
+    if (umount2(target, 0) == -1 && umount2(target, MNT_DETACH) == -1) {
+      LOGW("Failed reverting %s: %s", target, strerror(errno));
+
+      complete = false;
 
       continue;
     }
 
-    LOGW("Failed reverting %s: %s", target, strerror(errno));
-
-    complete = false;
+    LOGV("Reverted %s (mount id %u)", target, traces.items[i].id);
   }
 
   mount_list_free(&traces);

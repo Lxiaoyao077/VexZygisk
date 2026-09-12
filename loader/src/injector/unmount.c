@@ -259,14 +259,17 @@ static bool abort_zygote_unmount(const struct mount_list *traces) {
   return false;
 }
 
-/* INFO: The revert is off unless a device opts in. A metamodule owns the
-         mounting on KernelSU, and what it hangs there (themes, fonts,
-         overlays) is indistinguishable from a module mount to the trace
-         selection below: modules that rely on those mounts stopped working
-         while the revert was on. Dropping an enable-revert marker next to the
-         module turns it back on; the namespace fallback does the isolating
-         otherwise, which is what every other Zygisk implementation does. */
-static bool zygote_revert_enabled(void) {
+/* INFO: Revert-only is the default mount mode. The mounts are taken out of the
+         zygote once, and every process that is not on the denylist switches
+         back into the namespace captured beforehand, so the two halves stay in
+         balance: the apps being hidden see nothing, and the ones that are not
+         still see everything the mounts carry. A metamodule's mounts are
+         indistinguishable from a root trace to the selection below, which is
+         exactly why that second half cannot be left out.
+
+         Dropping a disable-revert marker next to the module switches the
+         namespace fallback back on without a rebuild. */
+bool zygote_revert_enabled(void) {
   static int enabled = -1;
 
   if (enabled == -1) {
@@ -275,8 +278,8 @@ static bool zygote_revert_enabled(void) {
     /* INFO: Both locations are checked because which one the zygote can
               actually see depends on the label the root solution gives
               /data/adb on that device. */
-    enabled = stat("/data/adb/rezygisk/enable-revert", &st) == 0 ||
-              stat("/data/adb/modules/rezygisk/enable-revert", &st) == 0;
+    enabled = !(stat("/data/adb/rezygisk/disable-revert", &st) == 0 ||
+                stat("/data/adb/modules/rezygisk/disable-revert", &st) == 0);
   }
 
   return enabled == 1;

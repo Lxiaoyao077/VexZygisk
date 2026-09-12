@@ -44,10 +44,14 @@ enum RootImplState {
   Abnormal
 };
 
-/* INFO: The loader only ever asks for the clean namespace, so no other state
-         is carried over the protocol. */
+/* INFO: The two namespaces the loader can ask for. Clean is what a denylisted
+         process switches into when the mounts could not be taken out of the
+         zygote; Root is the zygote's own view, captured while a revert-only
+         zygote still has them, and what a trusted process switches back into
+         to regain them. */
 enum MountNamespaceState {
-  Clean
+  Clean,
+  Root
 };
 
 #endif /* CONSTANTS_H */

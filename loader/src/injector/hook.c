@@ -1219,6 +1219,14 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
     if (!zygote_mounts_reverted()) update_mnt_ns(Clean, false);
   }
 
+  /* INFO: The other half of revert-only. A reverted zygote forked this process
+            without the module mounts, so a process that is not on the denylist
+            switches back into the namespace captured before that revert to
+            regain them. This is what keeps a metamodule's themes and overlays
+            visible to the apps that are not being hidden; without it every app
+            would run in a mount view that never had anything the mounts carry. */
+  if (!in_denylist && zygote_mounts_reverted()) update_mnt_ns(Mounted, false);
+
   /* INFO: Executed after setns to ensure a module can update the mounts of an
               application without worrying about it being overwritten by setns.
   */
@@ -1332,10 +1340,25 @@ static void rz_nativeForkSystemServer_post(struct zygisk_context *ctx) {
   rz_fork_post(ctx);
 }
 
+/* INFO: Set once, before the first revert. The namespace a trusted process
+         switches back into is only worth anything if it was taken while the
+         mounts were still there, and after the revert they are gone for good. */
+static bool g_root_ns_captured = false;
+
 static void rz_nativeForkAndSpecialize_pre(struct zygisk_context *ctx) {
   ctx->process = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->nice_name, NULL);
   LOGV("pre forkAndSpecialize [%s]", ctx->process);
   FLAG_SET(ctx, APP_FORK_AND_SPECIALIZE);
+
+  /* INFO: Captured immediately before the revert below, and only when
+           revert-only is the active mode. Asked once: the daemon holds the
+           namespace for the rest of the boot. Passing dry_run is what keeps
+           this from switching the zygote itself into it. */
+  if (!g_root_ns_captured) {
+    g_root_ns_captured = true;
+
+    if (zygote_revert_enabled()) update_mnt_ns(Mounted, true);
+  }
 
   /* INFO: This has to run before rz_fork_pre rather than inside
              rz_app_specialize_pre: that one executes in the forked child,
@@ -1343,8 +1366,9 @@ static void rz_nativeForkAndSpecialize_pre(struct zygisk_context *ctx) {
              zygote, and therefore every later fork, exactly as it was.
 
            Run from here it is a one-off: zygote gives up the root and module
-           mounts once, and every process forked afterwards inherits a view
-           that never had them. */
+           mounts once, and every process forked afterwards inherits a view that
+           never had them - which is why a process that is not on the denylist
+           switches back into the captured root namespace. */
   zygote_mounts_revert();
 
   rz_fork_pre(ctx);

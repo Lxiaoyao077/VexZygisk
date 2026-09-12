@@ -910,11 +910,15 @@ bool umount_root(void) {
 }
 
 int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
-  /* INFO: The clean namespace is requested for every denylisted process, so it
-            is cached for the daemon's lifetime instead of forked per process. */
+  /* INFO: One handle per kind, kept for the daemon's lifetime instead of being
+            forked per process: the clean one is asked for by every denylisted
+            process, the root one once, while the zygote still has its mounts. */
   static int clean_namespace_fd = -1;
+  static int root_namespace_fd = -1;
 
-  if (mns_state == Clean && clean_namespace_fd != -1) return clean_namespace_fd;
+  int *cached_fd = (mns_state == Clean) ? &clean_namespace_fd : &root_namespace_fd;
+
+  if (*cached_fd != -1) return *cached_fd;
 
   int sockets[2];
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == -1) {
@@ -968,6 +972,10 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
       goto finalize_mns_fork;
     }
 
+    /* INFO: Only the clean namespace is forked into a private copy and
+              stripped of the root mounts. Root is handed over exactly as the
+              tracee has it: the whole point of it is to see those mounts
+              again, so nothing may be unshared or unmounted here. */
     if (mns_state == Clean) {
       unshare(CLONE_NEWNS);
 
@@ -1041,7 +1049,9 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
     return -1;
   }
 
-  clean_namespace_fd = ns_fd;
+  /* INFO: The helper is gone by now, but the namespace it named survives: the
+            fd taken from /proc holds it for the daemon's lifetime. */
+  *cached_fd = ns_fd;
 
   return ns_fd;
 

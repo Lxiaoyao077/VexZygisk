@@ -17,7 +17,7 @@ The Zygisk Next developers are famous and trusted in the Android community, howe
 - FOSS (Forever)
 - Zygisk Next module support
 - KernelSU **and** APatch support, as dedicated builds
-- Denylist handled by a cached clean namespace, with no extra daemon processes
+- Denylist handled by reverting the mounts out of zygote, with the cached clean namespace as the fallback
 
 ## Root solution support
 
@@ -34,28 +34,31 @@ Each archive targets exactly one root solution and refuses to install from anyth
 
 ## Mount handling
 
-Denylisted processes are switched into a cached clean namespace, the way every
-other Zygisk implementation does it: zygote keeps a namespace without the root
-and module mounts, a denylisted app is switched into it, and everything else
-keeps the ordinary view.
+Revert-only is the default mount mode, and it takes two halves that have to
+travel together.
 
-VexZygisk can also revert the mounts from zygote itself, once, before the first
-fork — the approach OnyxZygisk calls *revert only* — which leaves every
-process forked afterwards with a view that never had those mounts, so no
-namespace switch is needed at all. It is **off by default**:
+The module and root mounts are reverted from zygote itself, once, before the
+first app fork — the approach OnyxZygisk calls *revert only* — so every process
+forked afterwards starts out unable to see them and a denylisted app needs no
+namespace switch at all.
 
-> [!WARNING]
-> Reverting breaks modules that depend on a metamodule's mounts. On KernelSU the
-> metamodule owns all module mounting, and what it hangs there — themes, fonts,
-> overlays — is indistinguishable from a module mount to the trace selection, so
-> those mounts get reverted along with the rest and the modules stop working.
-> Until the selection can tell them apart, enable it only if you know your setup
-> does not rely on mounted modules.
+Reverting alone would also hide the mounts from the apps that are meant to keep
+working, so a process that is **not** on the denylist is switched back into the
+namespace captured immediately before the revert. It keeps seeing everything
+the mounts carry, a metamodule's themes and overlays included. Leaving this half
+out is what makes the mode look broken: every app would then run in a view that
+never had the mounts.
 
-Enable it by dropping a marker next to the module and rebooting:
+A metamodule owns all module mounting on both KernelSU and APatch, and what it
+hangs there is indistinguishable from a root trace to the selection. The
+switch-back above is what covers that — not a narrower selection.
+
+Dropping a marker next to the module falls back to the namespace-only model, in
+which zygote keeps its mounts and denylisted apps are isolated through the
+cached clean namespace:
 
 ```sh
-touch /data/adb/rezygisk/enable-revert   # or /data/adb/modules/rezygisk/enable-revert
+touch /data/adb/rezygisk/disable-revert   # or /data/adb/modules/rezygisk/disable-revert
 ```
 
 Reverting is also skipped, and the namespace fallback used instead, when an
@@ -151,7 +154,7 @@ pieces to their sources.
 * [ZygiskNext](https://github.com/Dr-TSNG/ZygiskNext): The original Zygisk Next module architecture and the API VexZygisk speaks
 * [ZygiskNextNext](https://github.com/VeryBaaad/ZygiskNextNext): Reference implementation for the standalone Zygisk Next API
 * [Magisk](https://github.com/topjohnwu/Magisk): The foundation of modern Android root and Zygisk itself
-* [OnyxZygisk](https://github.com/OnyxZygisk/OnyxZygisk): The revert-only zygote mount model VexZygisk implements as an opt-in
+* [OnyxZygisk](https://github.com/OnyxZygisk/OnyxZygisk): The revert-only zygote mount model, both halves — reverting the mounts out of zygote and switching a trusted process back into the root namespace captured beforehand
 * [KernelSU](https://github.com/tiann/KernelSU): The kernel interface the KernelSU flavour talks to
 * [APatch](https://github.com/bmax121/APatch): The kernel patch that the APatch flavour manages alongside
 * [Dobby](https://github.com/LSPosed/Dobby): In-process code hooking engine behind the ZN `inlineHook` API

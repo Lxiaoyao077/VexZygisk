@@ -1442,8 +1442,17 @@ static void handle_update_mount_namespace(struct Client *client) {
   ret = write_uint32_t(client->fd, our_pid);
   ASSURE_SIZE_WRITE("UpdateMountNamespace", "our_pid", ret, sizeof(our_pid), return);
 
-  /* Only the requested namespace is handed back; the loader never asks
-     for the mounted one, so there is no reason to prime its cache here. */
+  /* INFO: Clean and Root are the only states this protocol carries; anything
+            else is a loader this daemon does not match. */
+  if (mns_state > (uint8_t)Root) {
+    LOGE("Invalid mount namespace state: %u", (unsigned int)mns_state);
+
+    ret = write_uint32_t(client->fd, (uint32_t)0);
+    ASSURE_SIZE_WRITE("UpdateMountNamespace", "ns_fd", ret, sizeof(uint32_t), return);
+
+    return;
+  }
+
   int ns_fd = save_mns_fd((pid_t)target_process, (enum MountNamespaceState)mns_state);
   if (ns_fd == -1) {
     LOGE("Failed to save mount namespace fd for pid %u: %s", target_process, strerror(errno));

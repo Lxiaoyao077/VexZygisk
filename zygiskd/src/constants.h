@@ -44,14 +44,12 @@ enum RootImplState {
   Abnormal
 };
 
-/* INFO: The two namespaces the loader can ask for. Clean is what a denylisted
-         process switches into when the mounts could not be taken out of the
-         zygote; Root is the zygote's own view, captured while a revert-only
-         zygote still has them, and what a trusted process switches back into
-         to regain them. */
+/* INFO: The clean namespace is the only one the loader ever asks for - it is
+         what a denylisted process is switched into when the in-place revert
+         could not be applied. Reverting in place needs no namespace from here,
+         so no other state is carried over the protocol. */
 enum MountNamespaceState {
-  Clean,
-  Root
+  Clean
 };
 
 #endif /* CONSTANTS_H */

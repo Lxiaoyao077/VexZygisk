@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <sched.h>
 #include <unistd.h>
 
 #include <csoloader.h>
@@ -247,11 +248,7 @@ static bool update_mnt_ns(enum mount_namespace_state mns_state, bool dry_run) {
     return false;
   }
 
-  const char *mns_state_str = "unknown";
-  if (mns_state == Clean) mns_state_str = "clean";
-  if (mns_state == Mounted) mns_state_str = "mounted";
-
-  LOGD("set mount namespace to [%s] fd=[%d]: %s", ns_path, updated_ns, mns_state_str);
+  LOGD("set mount namespace to [%s] fd=[%d]", ns_path, updated_ns);
 
   if (setns(updated_ns, CLONE_NEWNS) == -1) {
     PLOGE("Failed to set mount namespace [%s]", ns_path);
@@ -1175,11 +1172,12 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
            To avoid duplication, we will bypass this update_mnt_ns if we
              are going to execute it later, as the app will be in the
              denylist.
+
+           Only the fallback needs this, so a device running revert-only skips
+           the probe and saves the daemon the helper process that would have to
+           hold the namespace for the whole boot.
   */
-  /* INFO: Caching the clean namespace costs the daemon a helper process that
-             has to stay alive to hold it, which is exactly what a reverted
-             zygote makes unnecessary, so the probe is skipped then. */
-  if (!zygote_mounts_reverted() &&
+  if (!revert_mode_enabled() &&
       (ctx->info_flags & PROCESS_IS_FIRST_STARTED) == PROCESS_IS_FIRST_STARTED &&
       (ctx->info_flags & PROCESS_ON_DENYLIST) == 0 &&
       (ctx->info_flags & PROCESS_IS_MANAGER) == 0
@@ -1213,19 +1211,19 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
   if (in_denylist) {
     FLAG_SET(ctx, DO_REVERT_UNMOUNT);
 
-    /* INFO: A reverted zygote already forks children that cannot see the
-              mounts, so moving them into the clean namespace is only the
-              fallback for when reverting was refused. */
-    if (!zygote_mounts_reverted()) update_mnt_ns(Clean, false);
-  }
+    /* INFO: Revert-only, applied to this process alone. The private copy comes
+              first: unmounting without it would take the traces out of the
+              namespace the zygote itself sits in, and every later fork would
+              inherit that - which is what used to break the modules that
+              depend on the mounts a metamodule provides.
 
-  /* INFO: The other half of revert-only. A reverted zygote forked this process
-            without the module mounts, so a process that is not on the denylist
-            switches back into the namespace captured before that revert to
-            regain them. This is what keeps a metamodule's themes and overlays
-            visible to the apps that are not being hidden; without it every app
-            would run in a mount view that never had anything the mounts carry. */
-  if (!in_denylist && zygote_mounts_reverted()) update_mnt_ns(Mounted, false);
+           A refused or partial revert, or the mode being turned off, hides the
+           process the namespace way instead. That works just as well, at the
+           cost of putting every denylisted app into one shared namespace
+           object. */
+    if (!revert_mode_enabled() || unshare(CLONE_NEWNS) == -1 || !revert_root_traces_here())
+      update_mnt_ns(Clean, false);
+  }
 
   /* INFO: Executed after setns to ensure a module can update the mounts of an
               application without worrying about it being overwritten by setns.
@@ -1240,8 +1238,7 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
               modules are loaded and executed, so that the modules can have
               the chance to request it.
   */
-  if (!in_denylist && FLAG_GET(ctx, DO_REVERT_UNMOUNT) && !zygote_mounts_reverted())
-    update_mnt_ns(Clean, false);
+  if (!in_denylist && FLAG_GET(ctx, DO_REVERT_UNMOUNT)) update_mnt_ns(Clean, false);
 }
 
 static void rz_app_specialize_post(struct zygisk_context *ctx) {
@@ -1310,14 +1307,12 @@ static void rz_nativeForkSystemServer_pre(struct zygisk_context *ctx) {
   LOGV("pre forkSystemServer");
   FLAG_SET(ctx, SERVER_FORK_AND_SPECIALIZE);
 
-  /* INFO: Deliberately no zygote_mounts_revert() here. system_server is the
-           first child zygote forks and the framework it brings up expects the
-           module tree to still be mounted: KernelSU's meta-module mechanism
-           hangs Zygisk and framework-level content off those very mounts, and
-           reverting before this fork made modules mounted that way stop
-           working. Zygote itself is reverted before the first app fork
-           instead, by which point the framework has already taken what it
-           needs. */
+  /* INFO: system_server is left alone on purpose. It is the first child zygote
+           forks and nothing hides it, so it keeps the module tree the framework
+           expects: KernelSU's meta-module mechanism hangs Zygisk and
+           framework-level content off those very mounts. Nothing here has to
+           special-case it, because the revert only ever runs on a denylisted
+           process, on that process's own copy of the mount tree. */
   rz_fork_pre(ctx);
   if (!is_zygote_child(ctx)) return;
 
@@ -1340,37 +1335,17 @@ static void rz_nativeForkSystemServer_post(struct zygisk_context *ctx) {
   rz_fork_post(ctx);
 }
 
-/* INFO: Set once, before the first revert. The namespace a trusted process
-         switches back into is only worth anything if it was taken while the
-         mounts were still there, and after the revert they are gone for good. */
-static bool g_root_ns_captured = false;
-
 static void rz_nativeForkAndSpecialize_pre(struct zygisk_context *ctx) {
   ctx->process = (*ctx->env)->GetStringUTFChars(ctx->env, *ctx->args.app->nice_name, NULL);
   LOGV("pre forkAndSpecialize [%s]", ctx->process);
   FLAG_SET(ctx, APP_FORK_AND_SPECIALIZE);
 
-  /* INFO: Captured immediately before the revert below, and only when
-           revert-only is the active mode. Asked once: the daemon holds the
-           namespace for the rest of the boot. Passing dry_run is what keeps
-           this from switching the zygote itself into it. */
-  if (!g_root_ns_captured) {
-    g_root_ns_captured = true;
-
-    if (zygote_revert_enabled()) update_mnt_ns(Mounted, true);
-  }
-
-  /* INFO: This has to run before rz_fork_pre rather than inside
-             rz_app_specialize_pre: that one executes in the forked child,
-             where unmounting would clean up that single process and leave
-             zygote, and therefore every later fork, exactly as it was.
-
-           Run from here it is a one-off: zygote gives up the root and module
-           mounts once, and every process forked afterwards inherits a view that
-           never had them - which is why a process that is not on the denylist
-           switches back into the captured root namespace. */
-  zygote_mounts_revert();
-
+  /* INFO: Deliberately no revert here. Stripping the mounts out of the zygote
+           would strip them out of every later fork too, including the apps
+           that are meant to keep them - a metamodule's themes and overlays
+           among them. The revert runs per denylisted process from
+           rz_app_specialize_pre instead, on that process's own copy of the
+           mount tree. */
   rz_fork_pre(ctx);
   if (!is_zygote_child(ctx)) return;
 

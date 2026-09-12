@@ -121,6 +121,6 @@ bool check_unix_socket(int fd, bool block);
 
 void stringify_root_impl_name(struct root_impl impl, char *restrict output);
 
-int save_mns_fd(int pid, enum MountNamespaceState mns_state);
+int save_mns_fd(int pid);
 
 #endif /* UTILS_H */

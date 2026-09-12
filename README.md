@@ -17,7 +17,7 @@ The Zygisk Next developers are famous and trusted in the Android community, howe
 - FOSS (Forever)
 - Zygisk Next module support
 - KernelSU **and** APatch support, as dedicated builds
-- Denylist handled by reverting the mounts out of zygote, with the cached clean namespace as the fallback
+- Denylist handled by reverting the mounts in the hidden process itself, with the cached clean namespace as the fallback
 
 ## Root solution support
 
@@ -34,37 +34,35 @@ Each archive targets exactly one root solution and refuses to install from anyth
 
 ## Mount handling
 
-Revert-only is the default mount mode, and it takes two halves that have to
-travel together.
+Revert-only is the default mount mode, and it is applied to the process being
+hidden rather than to the zygote.
 
-The module and root mounts are reverted from zygote itself, once, before the
-first app fork — the approach OnyxZygisk calls *revert only* — so every process
-forked afterwards starts out unable to see them and a denylisted app needs no
-namespace switch at all.
+A denylisted process is given a private copy of the mount tree and the root
+traces are stripped from that copy. The zygote and every process that is not on
+the denylist keep their mounts, so a metamodule's themes and overlays stay
+visible to the apps that rely on them, and each app ends up holding a namespace
+object of its own — the same shape a normal app has, rather than one shared
+with every other hidden app.
 
-Reverting alone would also hide the mounts from the apps that are meant to keep
-working, so a process that is **not** on the denylist is switched back into the
-namespace captured immediately before the revert. It keeps seeing everything
-the mounts carry, a metamodule's themes and overlays included. Leaving this half
-out is what makes the mode look broken: every app would then run in a view that
-never had the mounts.
+Reverting out of the zygote instead is what used to break those modules: the
+mounts would go away for **every** process forked afterwards, hidden or not.
 
 A metamodule owns all module mounting on both KernelSU and APatch, and what it
-hangs there is indistinguishable from a root trace to the selection. The
-switch-back above is what covers that — not a narrower selection.
+hangs there is indistinguishable from a root trace to the selection. Applying
+the revert only to the processes being hidden is what covers that — the
+selection itself does not have to tell them apart.
 
-Dropping a marker next to the module falls back to the namespace-only model, in
-which zygote keeps its mounts and denylisted apps are isolated through the
-cached clean namespace:
+When the revert cannot be applied — an exact `/product` mount is among the
+traces, which some ROMs overlay with zygote resources, or some of them refuse
+to come down — the process is hidden the namespace way instead, by switching it
+into a cached clean namespace.
+
+Dropping a marker next to the module selects that namespace path for every
+process, without a rebuild:
 
 ```sh
 touch /data/adb/rezygisk/disable-revert   # or /data/adb/modules/rezygisk/disable-revert
 ```
-
-Reverting is also skipped, and the namespace fallback used instead, when an
-exact `/product` mount is among the traces, which some ROMs overlay with zygote
-resources. That refusal is decided once, so mountinfo is not re-parsed before
-every fork.
 
 ## Zygisk Next support
 
@@ -154,7 +152,7 @@ pieces to their sources.
 * [ZygiskNext](https://github.com/Dr-TSNG/ZygiskNext): The original Zygisk Next module architecture and the API VexZygisk speaks
 * [ZygiskNextNext](https://github.com/VeryBaaad/ZygiskNextNext): Reference implementation for the standalone Zygisk Next API
 * [Magisk](https://github.com/topjohnwu/Magisk): The foundation of modern Android root and Zygisk itself
-* [OnyxZygisk](https://github.com/OnyxZygisk/OnyxZygisk): The revert-only zygote mount model, both halves — reverting the mounts out of zygote and switching a trusted process back into the root namespace captured beforehand
+* [OnyxZygisk](https://github.com/OnyxZygisk/OnyxZygisk): The revert-only mount model — the trace selection and the in-place revert a hidden process runs on its own copy of the mount tree
 * [KernelSU](https://github.com/tiann/KernelSU): The kernel interface the KernelSU flavour talks to
 * [APatch](https://github.com/bmax121/APatch): The kernel patch that the APatch flavour manages alongside
 * [Dobby](https://github.com/LSPosed/Dobby): In-process code hooking engine behind the ZN `inlineHook` API

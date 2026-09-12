@@ -909,16 +909,13 @@ bool umount_root(void) {
   return true;
 }
 
-int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
-  /* INFO: One handle per kind, kept for the daemon's lifetime instead of being
-            forked per process: the clean one is asked for by every denylisted
-            process, the root one once, while the zygote still has its mounts. */
+int save_mns_fd(int pid) {
+  /* INFO: Every denylisted process that falls back to the clean namespace asks
+            for it, so it is cached for the daemon's lifetime instead of being
+            forked per process. */
   static int clean_namespace_fd = -1;
-  static int root_namespace_fd = -1;
 
-  int *cached_fd = (mns_state == Clean) ? &clean_namespace_fd : &root_namespace_fd;
-
-  if (*cached_fd != -1) return *cached_fd;
+  if (clean_namespace_fd != -1) return clean_namespace_fd;
 
   int sockets[2];
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == -1) {
@@ -972,21 +969,18 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
       goto finalize_mns_fork;
     }
 
-    /* INFO: Only the clean namespace is forked into a private copy and
-              stripped of the root mounts. Root is handed over exactly as the
-              tracee has it: the whole point of it is to see those mounts
-              again, so nothing may be unshared or unmounted here. */
-    if (mns_state == Clean) {
-      unshare(CLONE_NEWNS);
+    /* INFO: The helper forks a private copy of the mount tree and strips the
+              root traces out of it. That copy is what a denylisted process is
+              switched into when the in-place revert could not be applied. */
+    unshare(CLONE_NEWNS);
 
-      if (!umount_root()) {
-        LOGE("Failed to umount root");
+    if (!umount_root()) {
+      LOGE("Failed to umount root");
 
-        if (write_uint8_t(socket_child, 0) == -1)
-          LOGE("Failed to write to socket_child: %s", strerror(errno));
+      if (write_uint8_t(socket_child, 0) == -1)
+        LOGE("Failed to write to socket_child: %s", strerror(errno));
 
-        goto finalize_mns_fork;
-      }
+      goto finalize_mns_fork;
     }
 
     if (write_uint8_t(socket_child, 1) == -1) {
@@ -1051,7 +1045,7 @@ int save_mns_fd(int pid, enum MountNamespaceState mns_state) {
 
   /* INFO: The helper is gone by now, but the namespace it named survives: the
             fd taken from /proc holds it for the daemon's lifetime. */
-  *cached_fd = ns_fd;
+  clean_namespace_fd = ns_fd;
 
   return ns_fd;
 

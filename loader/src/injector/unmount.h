@@ -4,41 +4,39 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* INFO: Reverting the zygote is the "revert only" mount mode, and it takes two
-         halves. The module and root mounts are unmounted from zygote itself,
-         once, so every process forked afterwards starts out unable to see
-         them; and a process that is NOT on the denylist switches back into the
-         root namespace captured before that revert, so it keeps seeing what
-         the mounts carry - a metamodule's themes and overlays among them.
+/* INFO: "Revert only" is the mount mode a denylisted process is hidden with by
+         default: instead of switching it into a shared clean namespace, the
+         process is given a private copy of the mount tree and the root traces
+         are stripped from that copy.
 
-         Leaving the second half out is what makes the mode look broken: every
-         app would then run in a view that never had the mounts, breaking
-         exactly the modules those mounts exist for.
+         Doing it in place is what keeps the mode non-destructive. The zygote
+         and every process that is not on the denylist keep their mounts, so a
+         metamodule's themes and overlays stay visible to the apps that rely on
+         them, and each app ends up holding a namespace object of its own - the
+         same shape a normal app has, rather than one shared with every other
+         app the way a namespace switch leaves it.
 
-         Switching denylisted processes into a clean namespace stays as the
-         fallback for the cases where reverting is refused (see the /product
-         guard in unmount.c). */
+         A metamodule's mounts are indistinguishable from a root trace to the
+         selection, which is exactly why this is only ever applied to the
+         processes being hidden.
+
+         Switching into the shared clean namespace stays as the fallback for
+         when the revert is refused (see the /product guard in unmount.c) or
+         turned off with a disable-revert marker. */
 
 /* Whether revert-only is the active mount mode. True unless a disable-revert
-   marker next to the module opts the device out, in which case the zygote
-   keeps its mounts and the namespace fallback does the isolating.
+   marker next to the module opts the device out. */
+bool revert_mode_enabled(void);
 
-   The caller asks this before the first revert so the root namespace can be
-   captured while the mounts are still there. */
-bool zygote_revert_enabled(void);
+/* Strips the root traces from the mount namespace this process is in right
+   now, and returns true when nothing is left to hide.
 
-/* Attempts to unmount the root and module traces from zygote.
+   Meant to run on a denylisted process immediately after it unshared its own
+   copy of the mount tree: the mounts then disappear for that process alone.
 
-   Returns true when zygote is known to be clean, either because this call
-   reverted it or because an earlier call already did. Returns false when
-   nothing could be done, in which case the caller keeps hiding mounts the
-   namespace way.
-
-   Only ever performs work once: a successful revert is remembered, and a
-   refused or partial one is retried on the next fork. */
-bool zygote_mounts_revert(void);
-
-/* Whether an earlier zygote_mounts_revert() left zygote clean. */
-bool zygote_mounts_reverted(void);
+   Returns false when an exact /product mount is among the traces, or when some
+   of them could not be taken down, in which case the caller should hide the
+   process the namespace way instead. */
+bool revert_root_traces_here(void);
 
 #endif /* UNMOUNT_H */

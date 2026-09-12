@@ -57,9 +57,11 @@ struct rezygisk_info {
   bool running;
 };
 
+/* INFO: The loader only ever needs the clean namespace: a denylisted process
+         is switched into it when the in-place revert could not be applied.
+         Reverting in place needs no namespace from the daemon at all. */
 enum mount_namespace_state {
-  Clean,
-  Mounted
+  Clean
 };
 
 bool rezygiskd_zygote_injected(void);

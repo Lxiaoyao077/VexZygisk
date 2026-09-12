@@ -43,15 +43,6 @@ struct mount_list {
   size_t cap;
 };
 
-static bool g_zygote_reverted = false;
-
-/* INFO: Set when reverting was refused for a structural reason (an exact
-         /product mount among the traces). That is a property of the ROM, not
-         a transient failure, so it must not be retried: this runs before
-         every fork, and re-parsing mountinfo for a decision that cannot change
-         would tax every single app start. */
-static bool g_zygote_revert_refused = false;
-
 static void mount_list_free(struct mount_list *list) {
   for (size_t i = 0; i < list->len; i++) {
     free(list->items[i].root);
@@ -259,23 +250,17 @@ static bool abort_zygote_unmount(const struct mount_list *traces) {
   return false;
 }
 
-/* INFO: Revert-only is the default mount mode. The mounts are taken out of the
-         zygote once, and every process that is not on the denylist switches
-         back into the namespace captured beforehand, so the two halves stay in
-         balance: the apps being hidden see nothing, and the ones that are not
-         still see everything the mounts carry. A metamodule's mounts are
-         indistinguishable from a root trace to the selection below, which is
-         exactly why that second half cannot be left out.
-
-         Dropping a disable-revert marker next to the module switches the
-         namespace fallback back on without a rebuild. */
-bool zygote_revert_enabled(void) {
+/* INFO: Revert-only is the active mount mode unless a disable-revert marker
+         next to the module opts the device out, in which case denylisted
+         processes are isolated by switching them into the cached clean
+         namespace instead. */
+bool revert_mode_enabled(void) {
   static int enabled = -1;
 
   if (enabled == -1) {
     struct stat st;
 
-    /* INFO: Both locations are checked because which one the zygote can
+    /* INFO: Both locations are checked because which one a process can
               actually see depends on the label the root solution gives
               /data/adb on that device. */
     enabled = !(stat("/data/adb/rezygisk/disable-revert", &st) == 0 ||
@@ -285,16 +270,7 @@ bool zygote_revert_enabled(void) {
   return enabled == 1;
 }
 
-bool zygote_mounts_revert(void) {
-  if (g_zygote_reverted) return true;
-  if (g_zygote_revert_refused) return false;
-
-  if (!zygote_revert_enabled()) {
-    LOGD("Zygote revert is off, leaving the mounts alone");
-
-    return false;
-  }
-
+bool revert_root_traces_here(void) {
   struct mount_list all = { 0 };
   if (!mount_list_parse("/proc/self/mountinfo", &all)) {
     mount_list_free(&all);
@@ -327,10 +303,9 @@ bool zygote_mounts_revert(void) {
   mount_list_free(&all);
 
   if (abort_zygote_unmount(&traces)) {
-    /* INFO: Refused, not failed: the namespace fallback takes over from here
-              on and stays in place for the rest of this zygote's life. */
-    g_zygote_revert_refused = true;
-
+    /* INFO: Refused, not failed. The caller falls back to the clean
+              namespace, which hides the mounts by moving the process into a
+              namespace that never had them. */
     mount_list_free(&traces);
 
     return false;
@@ -365,17 +340,8 @@ bool zygote_mounts_revert(void) {
 
   mount_list_free(&traces);
 
-  if (!complete) {
-    LOGV("Zygote was only partly reverted, retrying on the next fork");
-
-    return false;
-  }
-
-  g_zygote_reverted = true;
-
-  return true;
-}
-
-bool zygote_mounts_reverted(void) {
-  return g_zygote_reverted;
+  /* INFO: A partial revert still returns false, so the caller can fall back
+            to the clean namespace rather than leaving the process with some of
+            the traces still visible. */
+  return complete;
 }

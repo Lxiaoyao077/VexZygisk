@@ -1,0 +1,35 @@
+# INFO: Keeps the workflow actions and the vendored build dependencies
+#       current. Everything Dependabot opens is a pull request: nothing lands
+#       on main without a build, and the Trusted CI compiles both flavours.
+version: 2
+updates:
+  # INFO: actions/checkout and actions/upload-artifact, used by ci.yml and
+  #       trusted_ci.yml. Grouped so a batch of action bumps arrives as one
+  #       pull request instead of one per action.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # INFO: PLTI, CSOLoader, Dobby and LSPlt are pinned commits rather than
+  #       released versions, so a bump means a new upstream commit. Monthly
+  #       and ungrouped on purpose: each one changes build inputs, so each
+  #       deserves its own build result to look at before it is taken.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"

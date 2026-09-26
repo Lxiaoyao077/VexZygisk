@@ -650,11 +650,10 @@ static const struct ZygiskNextRuntime zn_hyos_runtime = {
 };
 
 /* INFO: The runtime is exposed in the hyos_spawner process tree only: the
-         spawner and the apps it forks all carry the same /proc/self/exe,
-         and a registration made there is inherited by every child. */
-/* INFO: The spawner and every app it forks carry the same /proc/self/exe, so
-         this identifies the whole tree. An upgraded binary leaves a
-         " (deleted)" suffix on the link target. */
+         spawner and every app it forks carry the same /proc/self/exe, so this
+         identifies the whole tree, and a registration made in the spawner is
+         inherited by every child. An upgraded binary leaves a " (deleted)"
+         suffix on the link target. */
 static bool zn_hyos_process_is_spawner(void) {
   static int is_spawner = -1;
 

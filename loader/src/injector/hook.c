@@ -1180,7 +1180,13 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
              postSpecialize the namespace is already switched, so it is too late.
              Doing it first also lets modules touch denylisted processes without
              the change being reverted. */
-  bool in_denylist = (ctx->info_flags & PROCESS_ON_DENYLIST) == PROCESS_ON_DENYLIST;
+  /* INFO: The WebView app-zygote is never on the denylist, but it forks its
+            sandboxed children outside the specialization path and hands them
+            its own mount namespace. Left alone it keeps the root mount view
+            while a regular isolated process gets the clean one, and two
+            isolated processes then present different mount content. */
+  bool in_denylist = (ctx->info_flags & PROCESS_ON_DENYLIST) == PROCESS_ON_DENYLIST ||
+                     (ctx->process != NULL && strcmp(ctx->process, "webview_zygote") == 0);
   if (in_denylist) {
     FLAG_SET(ctx, DO_REVERT_UNMOUNT);
 

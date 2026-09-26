@@ -922,6 +922,8 @@ void parse_status(int status, char *buf, size_t len) {
   }
 }
 
+static const char kDeletedSuffix[] = " (deleted)";
+
 int get_program(int pid, char *buf, size_t size) {
   char path[PATH_MAX];
   snprintf(path, sizeof(path), "/proc/%d/exe", pid);
@@ -937,6 +939,15 @@ int get_program(int pid, char *buf, size_t size) {
     LOGW("Program path truncated (%zd >= %zu)", sz, size);
 
     sz = size - 1;
+  }
+
+  /* INFO: The kernel marks an executable whose file was replaced under a
+           running process - an OTA is the usual cause - and the suffix is part
+           of the link target, so a plain comparison against the expected path
+           would miss it. Stripped here so every caller matches the real path. */
+  if ((size_t)sz >= sizeof(kDeletedSuffix) - 1 &&
+      memcmp(buf + sz - (sizeof(kDeletedSuffix) - 1), kDeletedSuffix, sizeof(kDeletedSuffix) - 1) == 0) {
+    sz -= (ssize_t)(sizeof(kDeletedSuffix) - 1);
   }
 
   buf[sz] = '\0';

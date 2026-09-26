@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <dirent.h>
 #include <string.h>
 #include <time.h>
 #include <errno.h>
@@ -569,6 +570,155 @@ bool sigchld_listener_init() {
   return true;
 }
 
+/* INFO: Which executable this monitor owns and how the tracer has to be told
+         about it. False for anything left to another monitor. */
+static bool match_target(const char *program, const char **tracer, bool *is_tango, bool *is_spawner) {
+  if (strcmp(program, APP_PROCESS_NAME) == 0) {
+    *tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
+  }
+#ifdef __LP64__
+  else if (strcmp(program, OTHER_ZYGOTE_NAME) == 0) {
+    /* INFO: The 64-bit monitor owns only the primary Zygote; the secondary one
+              is left for a 32-bit monitor, if any. */
+    LOGD("Skipping the secondary Zygote, a 32-bit monitor owns it");
+
+    return false;
+  }
+#else
+  else if (strcmp(program, "/system_ext/bin/tango_translator") == 0) {
+    *tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
+    *is_tango = true;
+  }
+#endif
+  else if (strcmp(program, HYOS_SPAWNER_NAME) == 0) {
+    *tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
+    *is_spawner = true;
+  }
+
+  return *tracer != NULL;
+}
+
+/* INFO: The hand-off leaves the target stopped and untraced. Detaching with
+         SIGSTOP is what lets a fresh tracer seize a process that is already
+         past its exec, which is how the fork path and the claim below reach
+         the same starting state. */
+static void launch_tracer(pid_t pid, const char *tracer, bool is_tango, bool is_spawner) {
+  LOGD("Detaching %d", pid);
+  ptrace(PTRACE_DETACH, pid, 0, SIGSTOP);
+
+  int p = fork_dont_care();
+
+  if (p == 0) {
+    char pid_str[32];
+    snprintf(pid_str, sizeof(pid_str), "%d", pid);
+
+    LOGI("exec tracer command: %s trace %s%s%s", tracer, pid_str,
+         (count_zygote > 1 && !is_spawner) ? " --restart" : "",
+         is_tango ? " --tango" : "");
+
+    const char *tracer_name = position_after(tracer, '/');
+
+    /* INFO: Only restart companions if it's not the first time */
+    char *exec_argv[6];
+    int exec_argc = 0;
+    exec_argv[exec_argc++] = (char *)tracer_name;
+    exec_argv[exec_argc++] = "trace";
+    exec_argv[exec_argc++] = pid_str;
+    /* INFO: The spawner is not a zygote restart. Telling the
+              daemon otherwise makes it drop every companion, and
+              the apps the spawner already forked are left talking
+              to nothing. */
+    if (count_zygote > 1 && !is_spawner) exec_argv[exec_argc++] = "--restart";
+    if (is_tango) exec_argv[exec_argc++] = "--tango";
+    exec_argv[exec_argc] = NULL;
+
+    execv(tracer, exec_argv);
+
+    PLOGE("exec");
+
+    kill(pid, SIGKILL);
+
+    /* INFO: _exit, not exit: this fork shares the monitor's stdio
+              buffers and atexit handlers. */
+    _exit(1);
+  } else if (p == -1) {
+    PLOGE("fork");
+
+    kill(pid, SIGKILL);
+  }
+}
+
+/* INFO: A TRACEFORK monitor sees only the forks made after init was seized, so
+         anything already running when this monitor starts is invisible to that
+         path. That is the whole of a late-load session, and also the case for a
+         monitor that had to be restarted. Their executables are matched against
+         the same table the fork path uses, and each is seized and handed to a
+         tracer without being killed: a failed trace detaches and resumes it,
+         whereas a respawn depends on init restarting the process cleanly. */
+static void claim_running_targets(void) {
+  DIR *proc = opendir("/proc");
+  if (proc == NULL) {
+    PLOGE("opendir /proc");
+
+    return;
+  }
+
+  struct dirent *entry;
+  while ((entry = readdir(proc)) != NULL) {
+    if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+
+    char *endptr = NULL;
+    long pid_value = strtol(entry->d_name, &endptr, 10);
+    if (endptr == entry->d_name || *endptr != '\0' || pid_value <= 1) continue;
+
+    char program[PATH_MAX];
+    if (get_program((int)pid_value, program, sizeof(program)) == -1) continue;
+
+    const char *tracer = NULL;
+    bool is_tango = false;
+    bool is_spawner = false;
+
+    if (!match_target(program, &tracer, &is_tango, &is_spawner)) continue;
+
+    /* INFO: The zygote crash accounting is about restarts: these processes
+              were started before this monitor existed, so none of them is a
+              restart, and none carries the --restart flag below (the spawn
+              count is still 1). */
+    if (!is_spawner && !ensure_daemon_created()) {
+      LOGW("VexZygiskd%s not running, skipping %ld", MONITOR_ABI, pid_value);
+
+      continue;
+    }
+
+    LOGI("Claiming %ld (%s), already running when the monitor started", pid_value, program);
+
+    if (ptrace(PTRACE_SEIZE, (pid_t)pid_value, 0, 0) == -1) {
+      PLOGE("seize %ld", pid_value);
+
+      continue;
+    }
+
+    int status = 0;
+    if (waitpid((pid_t)pid_value, &status, __WALL) == -1) {
+      PLOGE("waitpid");
+
+      continue;
+    }
+
+    if (!WIFSTOPPED(status)) {
+      LOGE("Process %ld did not stop for the hand-off", pid_value);
+
+      ptrace(PTRACE_DETACH, (pid_t)pid_value, 0, SIGCONT);
+
+      continue;
+    }
+
+    launch_tracer((pid_t)pid_value, tracer, is_tango, is_spawner);
+  }
+
+  closedir(proc);
+}
+
 void sigchld_listener_callback() {
   while (1) {
     ssize_t s = read(sigchld_signal_fd, &sigchld_fdsi, sizeof(sigchld_fdsi));
@@ -725,33 +875,7 @@ void sigchld_listener_callback() {
               break;
             }
 
-            if (strcmp(program, APP_PROCESS_NAME) == 0) {
-              tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
-            }
-#ifdef __LP64__
-            else if (strcmp(program, OTHER_ZYGOTE_NAME) == 0) {
-              /* INFO: The 64-bit monitor owns only the primary Zygote; the
-                        secondary one is left for a 32-bit monitor, if any. */
-              LOGD("Skipping 32-bit Zygote %d", pid);
-            }
-#else
-            else if (strcmp(program, "/system_ext/bin/tango_translator") == 0) {
-              tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
-              is_tango = true;
-            }
-#endif
-/* INFO: The spawner spawns in PARALLEL, which overran the loader's
-          process-global specialize state and produced an infinite second-screen
-          bootloop on HyperOS. The loader now serializes its pipeline with a
-          semaphore (spawn_pipeline_enter/leave in hook.c), which is what makes
-          this branch safe to enable. If a bootloop recurs, capture dmesg during
-          the loop before touching this. */
-            else if (strcmp(program, HYOS_SPAWNER_NAME) == 0) {
-              tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
-              is_spawner = true;
-            }
-
-            if (tracer == NULL) break;
+            if (!match_target(program, &tracer, &is_tango, &is_spawner)) break;
 
             /* INFO: Crash-loop accounting and daemon creation are zygote
                      matters. The spawner has its own lifecycle and execs on
@@ -797,52 +921,9 @@ void sigchld_listener_callback() {
               break;
             }
 
-            LOGD("Detaching %d", pid);
-            ptrace(PTRACE_DETACH, pid, 0, SIGSTOP);
+            sigchld_status = 0;
 
-            {
-              sigchld_status = 0;
-              int p = fork_dont_care();
-
-              if (p == 0) {
-                char pid_str[32];
-                snprintf(pid_str, sizeof(pid_str), "%d", pid);
-
-                LOGI("exec tracer command: %s trace %s%s%s", tracer, pid_str,
-                     (count_zygote > 1 && !is_spawner) ? " --restart" : "",
-                     is_tango ? " --tango" : "");
-
-                const char *tracer_name = position_after(tracer, '/');
-
-                /* INFO: Only restart companions if it's not the first time */
-                char *exec_argv[6];
-                int exec_argc = 0;
-                exec_argv[exec_argc++] = (char *)tracer_name;
-                exec_argv[exec_argc++] = "trace";
-                exec_argv[exec_argc++] = pid_str;
-                /* INFO: The spawner is not a zygote restart. Telling the
-                          daemon otherwise makes it drop every companion, and
-                          the apps the spawner already forked are left talking
-                          to nothing. */
-                if (count_zygote > 1 && !is_spawner) exec_argv[exec_argc++] = "--restart";
-                if (is_tango) exec_argv[exec_argc++] = "--tango";
-                exec_argv[exec_argc] = NULL;
-
-                execv(tracer, exec_argv);
-
-                PLOGE("exec");
-
-                kill(pid, SIGKILL);
-
-                /* INFO: _exit, not exit: this fork shares the monitor's stdio
-                          buffers and atexit handlers. */
-                _exit(1);
-              } else if (p == -1) {
-                PLOGE("fork");
-
-                kill(pid, SIGKILL);
-              }
-            }
+            launch_tracer(pid, tracer, is_tango, is_spawner);
           } while (false);
         } else {
           char status_str[64];
@@ -1182,6 +1263,11 @@ void init_monitor() {
   if (!prepare_environment()) exit(1);
 
   if (!claim_init_tracer()) exit(1);
+
+  /* INFO: Targets that predate this monitor are not forks of init and so
+            never reach the TRACEFORK path; a late-load session is made
+            entirely of them, so they are claimed here instead. */
+  claim_running_targets();
 
   if (!monitor_events_init()) exit(1);
 

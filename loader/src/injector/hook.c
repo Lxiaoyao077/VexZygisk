@@ -22,6 +22,7 @@
 #include <plti.h>
 
 #include "daemon.h"
+#include "hiding.h"
 #include "misc.h"
 #include "module.h"
 
@@ -1217,6 +1218,12 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
 
 static void rz_app_specialize_post(struct zygisk_context *ctx) {
   rz_run_modules_post(ctx);
+
+  /* INFO: Only once the modules have run is it known which libraries
+            they left mapped, and that is what has to be hidden here. */
+  if ((ctx->info_flags & PROCESS_ON_DENYLIST) == PROCESS_ON_DENYLIST) {
+    hide_module_maps();
+  }
 
   /* INFO: HyperOS runtime dispatch. Modules registered through
              getRuntime().registerModule in the spawner (and inherited by

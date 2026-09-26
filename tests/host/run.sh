@@ -81,6 +81,15 @@ cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror -DROOT_IMPL_APATCH \
    tests/host/test_unmount.c -o /tmp/test_unmount_apatch
 /tmp/test_unmount_apatch
 
+# INFO: The maps hiding is the same shape: replacing a mapping needs a
+#       device, but which mappings qualify is decided on the path alone,
+#       and getting that wrong either leaves every module named or turns
+#       ashmem and the ART images into private copies.
+cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+   -Itests/host -Iloader/src/include \
+   tests/host/test_hiding.c -o /tmp/test_hiding
+/tmp/test_hiding
+
 cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
    -Itests/host -Izygiskd/src -Izygiskd/src/root_impl \
    tests/host/test_apatch.c -o /tmp/test_apatch

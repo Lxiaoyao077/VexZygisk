@@ -20,6 +20,7 @@
 
 #include "daemon.h"
 #include "logging.h"
+#include "zygisk_paths.h"
 
 #include "zn_api.h"
 #include "zn_loader.h"
@@ -63,7 +64,7 @@ static void *dlopen_via_fd(const char *path, int flags) {
     return NULL;
   }
 
-  int mem_fd = (int)syscall(SYS_memfd_create, "zn-module", MFD_CLOEXEC);
+  int mem_fd = (int)syscall(SYS_memfd_create, ZYGISK_ZN_MEMFD_NAME, MFD_CLOEXEC);
   if (mem_fd < 0) {
     LOGE("dlopen %s: memfd_create failed: %s", path, strerror(errno));
 

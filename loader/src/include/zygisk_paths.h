@@ -32,4 +32,11 @@
 #define ZYGISK_STATE_JSON ZYGISK_TMP_PATH "/state.json"
 #define ZYGISK_MODULE_PROP ZYGISK_MODULE_DIR "/module.prop"
 
+/* INFO: The memfd the Zygisk Next loader copies a module library into
+         before dlopen() of it - bionic rejects both the module path and a
+         plain fd. It is also the name the library carries in a maps
+         listing, so the loader and the hiding code have to agree on it. */
+#define ZYGISK_ZN_MEMFD_NAME "zn-module"
+#define ZYGISK_ZN_MEMFD "/memfd:" ZYGISK_ZN_MEMFD_NAME
+
 #endif /* ZYGISK_PATHS_H */

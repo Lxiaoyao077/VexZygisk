@@ -1219,9 +1219,13 @@ static void rz_app_specialize_pre(struct zygisk_context *ctx) {
 static void rz_app_specialize_post(struct zygisk_context *ctx) {
   rz_run_modules_post(ctx);
 
-  /* INFO: Only once the modules have run is it known which libraries
-            they left mapped, and that is what has to be hidden here. */
+  /* INFO: Neither is a mount, so neither is reachable from the revert,
+            and both are only final once the modules have run: the
+            libraries they left mapped are known by then, and the mount
+            table this process hands to the application is already the
+            cleaned one. */
   if ((ctx->info_flags & PROCESS_ON_DENYLIST) == PROCESS_ON_DENYLIST) {
+    refresh_mount_line();
     hide_module_maps();
   }
 

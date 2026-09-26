@@ -125,3 +125,34 @@ bool hide_module_maps(void) {
 
   return true;
 }
+
+/* INFO: bionic parses a mount table one line at a time into a single static
+         buffer, and whatever that buffer held when the zygote forked is what
+         every application inherits - read while the zygote still carried the
+         module mounts, so a process whose mount tree was cleaned afterwards
+         can still read them straight out of its own libc. No mount operation
+         reaches that buffer; the only way to replace its content is to parse a
+         mount table here, which leaves the last line of it behind. Specialize
+         time is when the tree is already the cleaned one, and it is before the
+         application gets to observe the buffer in any other state. */
+bool refresh_mount_line(void) {
+  FILE *mounts = setmntent("/proc/self/mounts", "r");
+  if (mounts == NULL) {
+    PLOGE("open /proc/self/mounts");
+
+    return false;
+  }
+
+  size_t lines = 0;
+  while (getmntent(mounts) != NULL) lines++;
+
+  endmntent(mounts);
+
+  if (lines == 0) {
+    LOGE("/proc/self/mounts has no entries");
+
+    return false;
+  }
+
+  return true;
+}

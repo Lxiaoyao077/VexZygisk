@@ -3,13 +3,22 @@ name: CodeQL
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
   schedule:
     # INFO: A weekly sweep even when nothing is pushed, so a new advisory
     #       against an unchanged dependency still surfaces.
     - cron: "0 3 * * 1"
 
+# INFO: Deliberately no pull_request trigger, and it is not an oversight. On a
+#       pull request the action switches to its overlay/TRAP-cache path, which
+#       it warns "Cannot build an overlay database because build-mode is set to
+#       'autobuild' instead of 'none'" for - so it falls back to a full
+#       database while still keeping the TRAP cache read-only, extracts nothing
+#       and fails the job with "could not process any code written in C/C++".
+#       That is not a first-run artifact: the overlay database is only ever
+#       saved when overlay mode was actually used, so a pull request can never
+#       find one to seed from. The default branch analysis below is what works,
+#       and a pull request is already compiled and tested by the two CI
+#       workflows; anything merged is scanned here immediately afterwards.
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})

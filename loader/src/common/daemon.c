@@ -275,13 +275,13 @@ void free_modules(struct zygisk_modules *modules) {
   modules->modules_count = 0;
 }
 
-bool rezygiskd_read_zn_modules(const char *process_name, const char *process_path, struct zn_module_file **out, size_t *out_len) {
+bool rezygiskd_read_zn_modules(const char *process_name, const char *process_path, uint8_t retry, struct zn_module_file **out, size_t *out_len) {
   *out = NULL;
   *out_len = 0;
 
   size_t filled = 0;
 
-  int fd = rezygiskd_connect(1);
+  int fd = rezygiskd_connect(retry);
   if (fd == -1) return false;
 
   safe_write(write_uint8_t(fd, (uint8_t)ReadZnModules), "ReadZnModules action", return false);

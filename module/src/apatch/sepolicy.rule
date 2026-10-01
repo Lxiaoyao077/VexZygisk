@@ -1,6 +1,15 @@
 type zygisk_file file_type
 typeattribute zygisk_file mlstrustedobject
-allow zygote zygisk_file sock_file {read write}
+
+# INFO: Granted to every domain rather than to zygote alone. On HyperOS the
+#       application processes are forked by hyos_spawner, so both the spawner
+#       and every app it starts sit outside the zygote domain - and those are
+#       precisely the processes that hold their own end of this socket: the ZN
+#       runtime, the module list and every companion connection reach them
+#       through it. A zygote-only rule leaves them unable to connect at all,
+#       which shows up as a HyperOS runtime that loads nothing.
+allow domain zygisk_file dir {search getattr}
+allow domain zygisk_file sock_file {read write getattr open}
 
 # INFO: "map" and "execute" are needed on top of "read open" because the loader
 #       mmaps and dlopens module libraries that reach it as unlabeled memfds on
@@ -14,13 +23,25 @@ allow zygote zygote capability sys_chroot
 allow zygote su dir search
 allow zygote su {lnk_file file} read
 
-allow zygote adb_data_file dir search
+# INFO: The directory itself has to be searchable from outside the zygote too:
+#       the HyperOS spawner and its apps resolve their own module libraries
+#       under /data/adb whenever the daemon cannot hand them over as an fd, and
+#       that fallback is the only thing that works on a device whose daemon is
+#       not running. The "file *" grant below stays on zygote on purpose - the
+#       fallback only ever needs to reach these libraries, not the whole tree.
+allow domain adb_data_file dir search
 allow zygote adb_data_file file *
 allow zygote proc file {read open}
 allow zygote nsfs file {read open}
 allow zygote zygote process execmem
 allow system_server system_server process execmem
 allow zygote tmpfs file *
+
+# INFO: The same tmpfs memfds the rule above covers for zygote, for the
+#       processes HyperOS runs outside it. Kept to the permissions a dlopen
+#       actually performs instead of a wildcard, since this one is not limited
+#       to the zygote.
+allow domain tmpfs file {open getattr map read execute}
 allow zygote appdomain_tmpfs file *
 
 # INFO: Zygisk Next libraries travel as memfds created by this daemon, so they
@@ -62,6 +83,11 @@ allow * su file execute
 #       while descriptor-free actions such as GetProcessFlags keep working,
 #       which makes the failure look like a matching problem.
 allow zygote su memfd_file {getattr read write map execute}
+
+# INFO: And the same grant for the HyperOS domains, which receive the very same
+#       memfds: on kernels that label memfds this way the transfer is dropped
+#       outright without it, so a spawner app gets no module at all.
+allow domain su memfd_file {getattr read write map execute}
 
 allow su su memfd_file {getattr read write map execute}
 allow su tmpfs file {getattr read write map execute}

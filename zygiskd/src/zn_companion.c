@@ -181,6 +181,25 @@ void zn_companion_entry(int fd) {
       continue;
     }
 
+    /* INFO: Acknowledged before the handling thread exists, so the loader's
+              read of this byte is evidence the companion really holds the
+              connection. A module that started talking straight away would
+              otherwise race a thread this process had not spawned yet. */
+    uint8_t ack = ZN_COMPANION_ACK;
+    ssize_t ack_written;
+
+    do {
+      ack_written = write(connection_fd, &ack, sizeof(ack));
+    } while (ack_written == -1 && errno == EINTR);
+
+    if (ack_written != (ssize_t)sizeof(ack)) {
+      LOGE(" - Failed acknowledging the module connection: %s", strerror(errno));
+
+      close(connection_fd);
+
+      continue;
+    }
+
     struct zn_client_thread_args *args = malloc(sizeof(struct zn_client_thread_args));
     if (args == NULL) {
       LOGE("Failed allocating the client thread args");

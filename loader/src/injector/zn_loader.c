@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <linux/limits.h>
 #include <linux/memfd.h>
+#include <poll.h>
 #include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -338,6 +339,24 @@ static void companion_main(const char *lib_path, int socket_fd) {
 
     if (connection_fd < 0) continue;
 
+    /* INFO: The same acknowledgement the daemon-hosted companion sends, off
+              the same shared contract: a module served by a locally forked
+              companion would otherwise wait for a byte that never arrives. */
+    uint8_t ack = ZN_COMPANION_ACK;
+    ssize_t ack_written;
+
+    do {
+      ack_written = write(connection_fd, &ack, sizeof(ack));
+    } while (ack_written == -1 && errno == EINTR);
+
+    if (ack_written != (ssize_t)sizeof(ack)) {
+      LOGE("Failed acknowledging the module connection: %s", strerror(errno));
+
+      close(connection_fd);
+
+      continue;
+    }
+
     companion->onModuleConnected(connection_fd);
   }
 }
@@ -514,6 +533,51 @@ int zn_companion_connect(void *handle) {
 
   close(sockets[1]);
 
+  /* INFO: The socket is only handed over once the companion acknowledges it, so
+            what the module receives is a connection the companion really holds.
+            Bounded, not blocking: a companion left over from an older build
+            never acknowledges, and hanging on it would turn a version skew into
+            a stuck connectCompanion instead of a socket that still works. */
+  struct pollfd waiting = { .fd = sockets[0], .events = POLLIN };
+
+  int ready;
+  do {
+    ready = poll(&waiting, 1, ZN_COMPANION_ACK_TIMEOUT_MS);
+  } while (ready == -1 && errno == EINTR);
+
+  if (ready > 0) {
+    uint8_t ack = 0;
+    ssize_t got;
+
+    do {
+      got = read(sockets[0], &ack, sizeof(ack));
+    } while (got == -1 && errno == EINTR);
+
+    if (got != (ssize_t)sizeof(ack)) {
+      LOGE("The companion did not acknowledge the connection (read returned %zd)", got);
+
+      close(sockets[0]);
+
+      return -1;
+    }
+
+    if (ack != ZN_COMPANION_ACK) {
+      LOGE("The companion answered with %u instead of an acknowledgement", (unsigned)ack);
+
+      close(sockets[0]);
+
+      return -1;
+    }
+  } else if (ready == 0) {
+    LOGW("The companion did not acknowledge within %d ms, using the connection anyway", ZN_COMPANION_ACK_TIMEOUT_MS);
+  } else {
+    LOGE("Failed waiting for the companion acknowledgement: %s", strerror(errno));
+
+    close(sockets[0]);
+
+    return -1;
+  }
+
   return sockets[0];
 }
 
@@ -600,11 +664,11 @@ static void load_module_file(const char *module_dir, const char *file, const cha
          Returns false only when the daemon itself could not be reached, which
          is the one case where scanning the modules directly is worth trying.
          An empty answer is a valid answer and must not trigger the fallback. */
-static bool load_modules_from_daemon(const char *process_name, const char *process_path) {
+static bool load_modules_from_daemon(const char *process_name, const char *process_path, uint8_t connect_retry) {
   struct zn_module_file *files = NULL;
   size_t files_len = 0;
 
-  if (!rezygiskd_read_zn_modules(process_name, process_path, &files, &files_len)) return false;
+  if (!rezygiskd_read_zn_modules(process_name, process_path, connect_retry, &files, &files_len)) return false;
 
   LOGD("Got %zu Zygisk Next module(s) from VexZygiskd", files_len);
 
@@ -680,8 +744,8 @@ static bool load_modules_from_daemon(const char *process_name, const char *proce
          This runs once in the zygote itself, and once more in every forked
          child with that child's own process name — without the second call,
          per-application targets (name=com.foo) would never match anywhere. */
-static void zn_load_modules_for(const char *process_name, const char *process_path) {
-  if (load_modules_from_daemon(process_name, process_path)) return;
+static void zn_load_modules_for(const char *process_name, const char *process_path, uint8_t connect_retry) {
+  if (load_modules_from_daemon(process_name, process_path, connect_retry)) return;
 
   LOGW("VexZygiskd is unavailable, reading the Zygisk Next modules directly");
 
@@ -714,7 +778,7 @@ static void zn_load_modules_for(const char *process_name, const char *process_pa
   closedir(dir);
 }
 
-void zn_load_all_modules(void) {
+void zn_load_all_modules(uint8_t connect_retry) {
   char *process_path = read_process_path();
   if (process_path == NULL) {
     LOGE("Failed resolving the current process path");
@@ -724,7 +788,7 @@ void zn_load_all_modules(void) {
 
   const char *process_name = get_process_name(process_path);
 
-  zn_load_modules_for(process_name, process_path);
+  zn_load_modules_for(process_name, process_path, connect_retry);
 
   free(process_path);
 }
@@ -739,7 +803,7 @@ void zn_load_modules_for_process(const char *process_name) {
     return;
   }
 
-  zn_load_modules_for(process_name, process_path);
+  zn_load_modules_for(process_name, process_path, 1);
 
   free(process_path);
 }

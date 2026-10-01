@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <dobby.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 
 #include "elf_util.h"
@@ -392,25 +393,80 @@ static size_t zn_hyos_module_count = 0;
 
 /* INFO: On HyperOS the spawner forks applications itself, so the ART hooks that
           announce a specialization in a zygote are absent. What every forked app
-          does go through is our own pthread_atfork and, system-side,
-          selinux_android_setcontext - which carries uid, seinfo and package name,
-          exactly what onAppSpecialized promises; pthread_setname_np adds the
-          process name. Without these the runtime table is handed out but nothing
-          ever fires. */
-static bool zn_hyos_in_child = false;
+          does go through is, system-side, selinux_android_setcontext - which
+          carries uid, seinfo and package name, exactly what onAppSpecialized
+          promises; pthread_setname_np adds the process name. Without these the
+          runtime table is handed out but nothing ever fires.
+
+          Which process is a child is decided from the pid, not from a fork
+          hook: the spawner is not guaranteed to fork through libc (a raw
+          clone() runs no pthread_atfork handler), and bionic caches getpid(),
+          so the syscall is what has to be read. */
 static bool zn_hyos_fired = false;
 static bool zn_hyos_has_process_name = false;
 static bool zn_hyos_atfork_installed = false;
 static char zn_hyos_process_name[256];
 
-typedef pid_t (*zn_hyos_fork_fn)(void);
+/* INFO: Whether zn_init_hyos_runtime() ran in this process, which is what
+          getRuntime() answers from. This is how the implementation the runtime
+          was ported from answers it, and it is the stable answer: decided once
+          in entry() by a check that has already succeeded, instead of being
+          re-derived from the process on every call - which gave the scan its
+          own ways to say no, and left getRuntime() returning nullptr in a
+          process that had been identified as the spawner. */
+static bool zn_hyos_runtime_enabled = false;
+
+/* INFO: The pid the runtime was initialized in, which is the spawner itself.
+          Every app it forks has the same executable and a different pid, so
+          that difference is what tells a child apart. Zero until
+          zn_init_hyos_runtime() ran, so nothing is a child before then. */
+static pid_t zn_hyos_spawner_pid = 0;
+
+static bool zn_hyos_in_child(void) {
+  return zn_hyos_spawner_pid != 0 && (pid_t)syscall(__NR_getpid) != zn_hyos_spawner_pid;
+}
+
 typedef int (*zn_hyos_setcontext_fn)(uid_t uid, int is_system_server, const char *se_info, const char *pkg_name);
 typedef int (*zn_hyos_setname_fn)(pthread_t thread, const char *name);
 
-static zn_hyos_fork_fn zn_hyos_original_fork = NULL;
 static zn_hyos_setcontext_fn zn_hyos_original_setcontext = NULL;
 static zn_hyos_setname_fn zn_hyos_original_setname = NULL;
 static bool zn_hyos_hooks_warned = false;
+
+/* INFO: The file name HyperOS gives the Rust runtime image. It is looked for in
+         the process maps rather than through /proc/self/exe, and the difference
+         is not cosmetic: on HyperOS the process that hosts the runtime is an
+         app_process binary with this image mapped into it, so its executable
+         name reads app_process64 and the runtime is simply invisible to an exe
+         check. Reading the maps is what the working implementations do, and it
+         is the only thing that finds the spawner on those builds.
+
+         An exe check is what this used to do, and it is why getRuntime()
+         answered "no runtime" on a HyperOS 4 device while everything else
+         looked correct - the module side then reported a failed HyperOS
+         runtime injection, and every hook installed for the runtime was
+         installed in a process that had been classified as an ordinary
+         zygote. */
+#define ZN_HYOS_SPAWNER_NAME "hyos_spawner"
+
+static bool zn_hyos_path_is_spawner(const char *path) {
+  static const char kDeletedSuffix[] = " (deleted)";
+
+  size_t len = strlen(path);
+  if (len > sizeof(kDeletedSuffix) - 1 &&
+      memcmp(path + len - (sizeof(kDeletedSuffix) - 1), kDeletedSuffix, sizeof(kDeletedSuffix) - 1) == 0) {
+    len -= sizeof(kDeletedSuffix) - 1;
+  }
+
+  /* INFO: Compared as a whole path component, so a longer name that merely
+            ends with it (say "hyos_spawner.bak") is not a match, while a build
+            that ships the runtime from another directory still is. */
+  size_t name_len = sizeof(ZN_HYOS_SPAWNER_NAME) - 1;
+  if (len <= name_len) return false;
+  if (path[len - name_len - 1] != '/') return false;
+
+  return memcmp(path + len - name_len, ZN_HYOS_SPAWNER_NAME, name_len) == 0;
+}
 
 /* INFO: File identity of the spawner's own executable, so its PLT entries
          can be hooked (YukiSU style). Rewriting spawner code in place for an
@@ -435,7 +491,7 @@ static bool zn_hyos_spawner_file_identity(dev_t *dev, ino_t *inode) {
     struct map_entry *entry = &maps->maps[i];
 
     if (entry->offset != 0 || entry->inode == 0 || entry->path == NULL) continue;
-    if (strstr(entry->path, "hyos_spawner") == NULL) continue;
+    if (!zn_hyos_path_is_spawner(entry->path)) continue;
 
     zn_hyos_spawner_dev = entry->dev;
     zn_hyos_spawner_inode = entry->inode;
@@ -454,23 +510,10 @@ static bool zn_hyos_spawner_file_identity(dev_t *dev, ino_t *inode) {
   return found;
 }
 
-/* INFO: Marking the child at the fork return point is what actually fires:
-         the spawner forks through its own PLT, and inline-hooking fork in a
-         writable image is not always possible. */
-static void zn_hyos_atfork_child(void);
-
-static pid_t zn_hyos_fork_hook(void) {
-  pid_t result = zn_hyos_original_fork != NULL ? zn_hyos_original_fork() : -1;
-
-  if (result == 0) zn_hyos_atfork_child();
-
-  return result;
-}
-
 /* INFO: Fires once per child: the callback contract promises exactly one
          onAppSpecialized per app process. */
 static void zn_hyos_deliver(const char *pkg_name, const char *se_info) {
-  if (!zn_hyos_in_child || zn_hyos_fired || zn_hyos_module_count == 0) return;
+  if (!zn_hyos_in_child() || zn_hyos_fired || zn_hyos_module_count == 0) return;
 
   zn_hyos_fired = true;
 
@@ -492,7 +535,7 @@ static int zn_hyos_setcontext_hook(uid_t uid, int is_system_server, const char *
 
   if (result == 0) {
     zn_hyos_deliver(pkg_name, se_info);
-  } else if (zn_hyos_in_child && !zn_hyos_fired) {
+  } else if (zn_hyos_in_child() && !zn_hyos_fired) {
     LOGW("HyperOS runtime: selinux_android_setcontext failed (%d)", result);
   }
 
@@ -502,7 +545,11 @@ static int zn_hyos_setcontext_hook(uid_t uid, int is_system_server, const char *
 static int zn_hyos_setname_hook(pthread_t thread, const char *name) {
   int result = zn_hyos_original_setname != NULL ? zn_hyos_original_setname(thread, name) : -1;
 
-  if (result == 0 && !zn_hyos_has_process_name && zn_hyos_in_child && !zn_hyos_fired && name != NULL) {
+  /* INFO: Only thread's own name counts as this process's name; the spawner
+            names its helpers too, and the child check is what keeps the
+            spawner's own threads from being captured. */
+  if (result == 0 && !zn_hyos_has_process_name && !zn_hyos_fired && name != NULL && name[0] != '\0' &&
+      pthread_equal(thread, pthread_self()) && zn_hyos_in_child()) {
     snprintf(zn_hyos_process_name, sizeof(zn_hyos_process_name), "%s", name);
     zn_hyos_has_process_name = true;
 
@@ -512,11 +559,23 @@ static int zn_hyos_setname_hook(pthread_t thread, const char *name) {
   return result;
 }
 
-static void zn_hyos_atfork_child(void) {
-  zn_hyos_in_child = true;
-  zn_hyos_fired = false;
-  zn_hyos_has_process_name = false;
-  zn_hyos_process_name[0] = '\0';
+/* INFO: One PLT hook on the spawner's own image. A symbol the image does not
+         import has no GOT entry to rewrite, which is not a failure: the inline
+         hook below covers that case, so NULL is returned and the caller falls
+         back. */
+static void *zn_hyos_plt_hook_spawner(dev_t dev, ino_t inode, const char *symbol, void *hook) {
+  void *backup = NULL;
+
+  if (zn_lsplt_register_hook(dev, inode, symbol, hook, &backup) == 0 &&
+      zn_lsplt_commit_hook() == 0 && backup != NULL) {
+    LOGD("HyperOS runtime: PLT hooked %s in the spawner", symbol);
+
+    return backup;
+  }
+
+  LOGW("HyperOS runtime: PLT hook of %s failed, falling back to an inline hook", symbol);
+
+  return NULL;
 }
 
 /* INFO: Installed from the fork prepare handler as well as at registration:
@@ -525,34 +584,22 @@ static void zn_hyos_atfork_child(void) {
 static void zn_hyos_install_hooks(void) {
   /* INFO: YukiSU-style PLT hooks on the spawner's own image are tried first:
            they only rewrite GOT entries, which always works, whereas an
-           inline hook rewrites code and can be refused. The spawner calls
-           fork and selinux_android_setcontext through its own PLT. */
+           inline hook rewrites code and can be refused. The spawner reaches
+           selinux_android_setcontext and pthread_setname_np through its own
+           PLT. fork is not hooked any more: the child state is read from the
+           pid instead. */
   dev_t spawner_dev = 0;
   ino_t spawner_inode = 0;
 
   if (zn_hyos_spawner_file_identity(&spawner_dev, &spawner_inode)) {
-    if (zn_hyos_original_fork == NULL) {
-      void *backup = NULL;
-
-      if (zn_lsplt_register_hook(spawner_dev, spawner_inode, "fork",
-                                 (void *)(uintptr_t)zn_hyos_fork_hook, &backup) == 0 &&
-          zn_lsplt_commit_hook() == 0 && backup != NULL) {
-        zn_hyos_original_fork = (zn_hyos_fork_fn)(uintptr_t)backup;
-
-        LOGD("HyperOS runtime: PLT hooked fork in the spawner");
-      }
+    if (zn_hyos_original_setcontext == NULL) {
+      zn_hyos_original_setcontext = (zn_hyos_setcontext_fn)(uintptr_t)zn_hyos_plt_hook_spawner(
+        spawner_dev, spawner_inode, "selinux_android_setcontext", (void *)(uintptr_t)zn_hyos_setcontext_hook);
     }
 
-    if (zn_hyos_original_setcontext == NULL) {
-      void *backup = NULL;
-
-      if (zn_lsplt_register_hook(spawner_dev, spawner_inode, "selinux_android_setcontext",
-                                 (void *)(uintptr_t)zn_hyos_setcontext_hook, &backup) == 0 &&
-          zn_lsplt_commit_hook() == 0 && backup != NULL) {
-        zn_hyos_original_setcontext = (zn_hyos_setcontext_fn)(uintptr_t)backup;
-
-        LOGD("HyperOS runtime: PLT hooked selinux_android_setcontext in the spawner");
-      }
+    if (zn_hyos_original_setname == NULL) {
+      zn_hyos_original_setname = (zn_hyos_setname_fn)(uintptr_t)zn_hyos_plt_hook_spawner(
+        spawner_dev, spawner_inode, "pthread_setname_np", (void *)(uintptr_t)zn_hyos_setname_hook);
     }
   }
 
@@ -630,13 +677,18 @@ static int zn_hyos_register_module(const void *module_ptr) {
   /* INFO: Only the spawner itself registers. The children it forks inherit
             the table through fork, and re-arming the fork handlers in each of
             them would stack up one pair per registration. */
-  if (!zn_hyos_in_child && !zn_hyos_atfork_installed) {
-    zn_hyos_atfork_installed = true;
+  if (!zn_hyos_in_child()) {
+    if (!zn_hyos_atfork_installed) {
+      zn_hyos_atfork_installed = true;
 
-    pthread_atfork(zn_hyos_atfork_prepare, NULL, zn_hyos_atfork_child);
+      /* INFO: The prepare hook re-installs late-arrived symbols before a
+                fork; the child needs no hook of its own now that its state
+                is read from the pid. */
+      pthread_atfork(zn_hyos_atfork_prepare, NULL, NULL);
+    }
+
+    zn_hyos_install_hooks();
   }
-
-  zn_hyos_install_hooks();
 
   LOGD("HyperOS runtime: module registered (%zu total)", zn_hyos_module_count);
 
@@ -654,31 +706,71 @@ static const struct ZygiskNextRuntime zn_hyos_runtime = {
          identifies the whole tree, and a registration made in the spawner is
          inherited by every child. An upgraded binary leaves a " (deleted)"
          suffix on the link target. */
+/* INFO: Whether the HyperOS Rust runtime is reachable from this process. This
+         is the question the ZN runtime API answers, and the one the injector
+         needs before it picks its hook set, so both read it from here.
+
+         It is a mapping lookup and not an exe lookup - see
+         zn_hyos_path_is_spawner above. A child forked from the spawner inherits
+         the mapping and therefore answers yes as well, which is exactly what
+         the runtime contract wants: the module registered in the spawner is
+         inherited, and every app it forks answers for the same runtime.
+         An upgraded binary leaves a " (deleted)" suffix on the mapping, which
+         the predicate strips. */
 static bool zn_hyos_process_is_spawner(void) {
   static int is_spawner = -1;
 
-  if (is_spawner == -1) {
-    is_spawner = 0;
+  if (is_spawner != -1) return is_spawner == 1;
 
-    char exe[PATH_MAX];
-    ssize_t length = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+  /* INFO: Answered from the executable's own path, the way the implementation
+           this runtime was ported from answers it: the spawner runs as its own
+           executable, so /proc/self/exe names it directly.
 
-    if (length > 0) {
-      exe[length] = '\0';
+           A mapping scan was tried here first and is not what decides this.
+           The spawner image is mapped in the spawner because it *is* its
+           executable, so the scan only ever re-derived the same answer, while
+           adding ways of its own to say no - a scan that could not be read, or
+           a mapping whose offset was not zero. The scan keeps the one job it is
+           actually needed for: getting the (dev, inode) pair that identifies
+           the image to the PLT hooks. */
+  char path[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
 
-      size_t len = (size_t)length;
-      if (len > 10 && strcmp(exe + len - 10, " (deleted)") == 0) {
-        len -= 10;
-        exe[len] = '\0';
-      }
+  if (len <= 0) {
+    /* INFO: Left uncached on purpose: a failed read is not an answer. */
+    LOGE("HyperOS runtime: cannot read /proc/self/exe");
 
-      const char *base = strrchr(exe, '/');
-
-      is_spawner = strcmp(base == NULL ? exe : base + 1, "hyos_spawner") == 0;
-    }
+    return false;
   }
 
+  path[len] = '\0';
+
+  is_spawner = zn_hyos_path_is_spawner(path) ? 1 : 0;
+
+  LOGD("HyperOS runtime: %s (exe %s)", is_spawner == 1 ? "spawner" : "not the spawner", path);
+
   return is_spawner == 1;
+}
+
+/* INFO: Remembers which process the runtime belongs to. Called once, in the
+         spawner, before any module can register: every later "is this a
+         child?" answer is that pid against the current one.
+
+         Idempotent on purpose. A process forked from the spawner inherits the
+         recorded pid, so a second call there would answer "this is the
+         spawner" with the child's own pid and make zn_hyos_in_child() false
+         for the rest of its life - onAppSpecialized would then never fire for
+         that app, silently. Only the first call in a fresh process counts. */
+void zn_init_hyos_runtime(void) {
+  /* INFO: Idempotent, because the flag is inherited by every app the spawner
+            forks: a second call in one of them would otherwise pin the runtime
+            to the child and leave it answering "not a child" about itself. */
+  if (zn_hyos_runtime_enabled) return;
+
+  zn_hyos_runtime_enabled = true;
+  zn_hyos_spawner_pid = (pid_t)syscall(__NR_getpid);
+
+  LOGD("HyperOS runtime enabled in pid %d", zn_hyos_spawner_pid);
 }
 
 bool zn_is_hyos_spawner(void) {
@@ -686,7 +778,19 @@ bool zn_is_hyos_spawner(void) {
 }
 
 static const struct ZygiskNextRuntime *zn_get_runtime(void) {
-  return zn_hyos_process_is_spawner() ? &zn_hyos_runtime : NULL;
+  /* INFO: Answered from the flag zn_init_hyos_runtime() set rather than from a
+            fresh look at the process. entry() has already decided what this
+            process is, and a module asking for the runtime has to be given the
+            answer entry() reached - a second, independent check can only
+            disagree with it, and disagreeing means handing out nullptr to a
+            module loaded into a process that does have a runtime. */
+  if (!zn_hyos_runtime_enabled) {
+    LOGD("HyperOS runtime: getRuntime() in a process that has no runtime");
+
+    return NULL;
+  }
+
+  return &zn_hyos_runtime;
 }
 
 bool zn_hyos_modules_registered(void) {

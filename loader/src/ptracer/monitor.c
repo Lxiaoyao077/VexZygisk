@@ -27,8 +27,12 @@
 
 /* INFO: HyperOS's app spawner, the third process (besides the two zygotes)
          that forks application processes. Both ABI monitors match it, each
-         injecting its own bitness into its own bitness spawner. */
-#define HYOS_SPAWNER_NAME "/system_ext/bin/hyos_spawner"
+         injecting its own bitness into its own bitness spawner.
+
+         Matched by file name rather than by one fixed path: HyperOS has shipped
+         the binary from more than one directory across releases, so whichever
+         directory the running build uses has to be followed. */
+#define HYOS_SPAWNER_BASE_NAME "hyos_spawner"
 
 static bool update_status(const char *message);
 
@@ -712,13 +716,29 @@ bool sigchld_listener_init() {
   return true;
 }
 
+/* INFO: A path whose last component is the spawner's file name. The leading
+         slash is required so a longer name that merely ends with it (say
+         "xhyos_spawner") is not mistaken for the spawner. */
+static bool is_spawner_program(const char *program) {
+  static const char kBase[] = HYOS_SPAWNER_BASE_NAME;
+
+  size_t program_len = strlen(program);
+  size_t base_len = sizeof(kBase) - 1;
+
+  if (program_len <= base_len) return false;
+
+  const char *base = program + program_len - base_len;
+
+  return base[-1] == '/' && strcmp(base, kBase) == 0;
+}
+
 /* INFO: Which executable this monitor owns and how the tracer has to be told
          about it. False for anything left to another monitor. The tracer and
          the spawner flag describe the fork path's hand-off only, so a caller
          that just needs the ownership answer - the respawn below - passes NULL
          for both instead of keeping a second copy of the table. */
 static bool match_target(const char *program, const char **tracer, bool *is_spawner) {
-  bool program_is_spawner = strcmp(program, HYOS_SPAWNER_NAME) == 0;
+  bool program_is_spawner = is_spawner_program(program);
   if (strcmp(program, APP_PROCESS_NAME) != 0 && !program_is_spawner) return false;
 
   if (tracer != NULL) *tracer = "./bin/zygisk-ptrace" MONITOR_ABI;
@@ -1096,32 +1116,40 @@ void sigchld_listener_callback() {
 
             if (!match_target(program, &tracer, &is_spawner)) break;
 
-            /* INFO: Crash-loop accounting and daemon creation are zygote
-                     matters. The spawner has its own lifecycle and execs on
-                     its own schedule; counting those execs like zygote
-                     restarts would trip the crash-loop stop after a burst of
-                     app launches, and re-ensuring the daemon from here is
-                     what the zygote injection already did. */
-            if (!is_spawner) {
-              if (should_stop_inject()) {
-                LOGW("Zygote" MONITOR_ABI " restart too many times, stop injecting");
+            /* INFO: The crash-loop counter is about the zygote restarting. The
+                     spawner has its own lifecycle and execs on its own
+                     schedule, so counting those execs the same way would trip
+                     the crash-loop stop after a burst of app launches. */
+            if (!is_spawner && should_stop_inject()) {
+              LOGW("Zygote" MONITOR_ABI " restart too many times, stop injecting");
 
-                tracing_state = STOPPING;
-                monitor_stop_reason = "Zygote crashed";
-                ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+              tracing_state = STOPPING;
+              monitor_stop_reason = "Zygote crashed";
+              ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+
+              break;
+            }
+
+            /* INFO: Both targets need the daemon, and the spawner can exec
+                     before the zygote ever does, so creating it cannot be left
+                     to the zygote injection. A spawner with no daemon is
+                     skipped rather than fatal: this monitor's job is the
+                     zygote, and stopping here would take a healthy zygote down
+                     with it. */
+            if (!ensure_daemon_created()) {
+              if (is_spawner) {
+                LOGW("VexZygiskd%s not running, skipping hyos_spawner %d", MONITOR_ABI, pid);
 
                 break;
               }
 
-              if (!ensure_daemon_created()) {
-                LOGW("VexZygiskd%s not running, stop injecting", MONITOR_ABI);
+              LOGW("VexZygiskd%s not running, stop injecting", MONITOR_ABI);
 
-                tracing_state = STOPPING;
-                monitor_stop_reason = "VexZygiskd not running";
-                ptrace(PTRACE_INTERRUPT, 1, 0, 0);
+              tracing_state = STOPPING;
+              monitor_stop_reason = "VexZygiskd not running";
+              ptrace(PTRACE_INTERRUPT, 1, 0, 0);
 
-                break;
-              }
+              break;
             }
 
             LOGD("Stopping %d (program: %s, tracer: %s)", pid, program, tracer);

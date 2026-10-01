@@ -721,6 +721,73 @@ static size_t zn_dir_cache_len;
 static struct stat zn_dir_st;
 static bool zn_dir_valid;
 
+/* INFO: A module names its library as a relative path or as an absolute one,
+         so nothing stops a zn_modules.txt from pointing at another module's
+         directory or at a system file. Only a library that really lives inside
+         its own module directory is accepted, which is also what makes the
+         per-module disable and remove switches mean anything. `resolved`
+         receives the canonical path, so every path this daemon hands out later
+         is one that can be compared as a string. */
+static bool zn_library_in_module_dir(const char *module_dir, const char *lib_path, char *resolved, size_t resolved_size) {
+  char real_dir[PATH_MAX];
+  if (realpath(module_dir, real_dir) == NULL) return false;
+
+  char real_lib[PATH_MAX];
+  if (realpath(lib_path, real_lib) == NULL) return false;
+
+  size_t dir_len = strlen(real_dir);
+  size_t lib_len = strlen(real_lib);
+
+  /* INFO: The separator is required as well: "/data/adb/modules/foo" must not
+            accept "/data/adb/modules/foobar/lib.so". */
+  if (lib_len <= dir_len) return false;
+  if (strncmp(real_lib, real_dir, dir_len) != 0) return false;
+  if (real_lib[dir_len] != '/') return false;
+
+  if (lib_len >= resolved_size) return false;
+
+  memcpy(resolved, real_lib, lib_len + 1);
+
+  return true;
+}
+
+/* INFO: A Zygisk Next library is loaded by the target process itself, so one
+         built for the other bitness can never work there. Shipping a 32- and a
+         64-bit build and listing both is the common way modules are packaged,
+         so this is a normal case and not a module's mistake: skipping it here
+         keeps a guaranteed-failing dlopen out of every target. */
+static bool zn_library_matches_abi(const char *path) {
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd == -1) return false;
+
+  unsigned char header[5];
+  size_t filled = 0;
+
+  while (filled < sizeof(header)) {
+    ssize_t got = read(fd, header + filled, sizeof(header) - filled);
+    if (got == -1) {
+      if (errno == EINTR) continue;
+
+      break;
+    }
+
+    if (got == 0) break;
+
+    filled += (size_t)got;
+  }
+
+  close(fd);
+
+  if (filled < sizeof(header)) return false;
+  if (header[0] != 0x7F || header[1] != 'E' || header[2] != 'L' || header[3] != 'F') return false;
+
+#if defined(__LP64__)
+  return header[4] == 2;  /* INFO: ELFCLASS64. */
+#else
+  return header[4] == 1;  /* INFO: ELFCLASS32. */
+#endif
+}
+
 static void zn_parse_cache_free_lines(struct zn_cached_module *module) {
   for (size_t i = 0; i < module->lines_len; i++) {
     free(module->lines[i].target);
@@ -823,6 +890,43 @@ static struct zn_cached_module *zn_parse_cache_get(const char *dir_name, const c
 
     if (!parse_zn_line(module_dir, line, &is_name, &target, &companion, &lib_path)) continue;
 
+    /* INFO: Both checks run here, once per file change, and not wherever the
+             rows are consumed: realpath() stats every path component and the
+             ABI check opens the file, while collect_zn_modules walks every
+             module on every fork. What gets cached is the canonical path, so
+             the per-fork path stays a plain string compare. */
+    char canonical[PATH_MAX];
+
+    if (!zn_library_in_module_dir(module_dir, lib_path, canonical, sizeof(canonical))) {
+      LOGW("The Zygisk Next library \"%s\" of \"%s\" cannot be resolved inside its module directory, skipping", lib_path, dir_name);
+
+      free(target);
+      free(lib_path);
+
+      continue;
+    }
+
+    free(lib_path);
+
+    lib_path = strdup(canonical);
+
+    if (lib_path == NULL) {
+      LOGE("Failed copying the canonical path of \"%s\"", canonical);
+
+      free(target);
+
+      continue;
+    }
+
+    if (!zn_library_matches_abi(lib_path)) {
+      LOGD("The Zygisk Next library \"%s\" is not built for this ABI, skipping", lib_path);
+
+      free(target);
+      free(lib_path);
+
+      continue;
+    }
+
     struct zn_cached_line *tmp = realloc(module->lines, (module->lines_len + 1) * sizeof(struct zn_cached_line));
     if (tmp == NULL) {
       LOGE("Failed growing the parsed rows of \"%s\"", dir_name);
@@ -850,11 +954,24 @@ static struct zn_cached_module *zn_parse_cache_get(const char *dir_name, const c
   return module;
 }
 
+/* INFO: How many libraries one process's plan is deduplicated against. A plan
+         is a handful of entries; this only exists so the per-fork path cannot
+         grow an allocation. Past the cap a duplicate slips through to the
+         loader's own already-loaded check, which is cheaper than the growth
+         would be. */
+#define ZN_PLAN_DEDUP_MAX 32
+
 static bool collect_zn_modules(const char *process_name, const char *process_path, struct ZnModuleFile **out, size_t *out_len) {
   *out = NULL;
   *out_len = 0;
 
   size_t capacity = 0;
+
+  /* INFO: Two modules may list the same library, and loading it twice would
+           install its hooks twice. The paths are canonical by the time they get
+           here (see zn_parse_cache_get), so a string compare decides it. */
+  const char *served[ZN_PLAN_DEDUP_MAX];
+  size_t served_len = 0;
 
   struct stat dir_st;
   if (stat(ZYGISK_MODULES_DIR, &dir_st) == -1) {
@@ -917,6 +1034,14 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 
     if (access(disabled, F_OK) == 0) continue;
 
+    /* INFO: A module marked for removal is on its way out at the next reboot;
+              handing its libraries to new processes until then is not wanted,
+              and the standard module path already treats "remove" this way. */
+    char removed[PATH_MAX];
+    snprintf(removed, PATH_MAX, "%s/remove", module_dir);
+
+    if (access(removed, F_OK) == 0) continue;
+
     char zn_file[PATH_MAX];
     snprintf(zn_file, PATH_MAX, "%s/zn_modules.txt", module_dir);
 
@@ -930,6 +1055,18 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
       struct zn_cached_line *line = &cached->lines[row];
 
       if (!zn_matches_target(line->target, line->is_name, process_name, process_path)) continue;
+
+      bool already_served = false;
+
+      for (size_t seen = 0; seen < served_len; seen++) {
+        if (strcmp(served[seen], line->lib_path) == 0) {
+          already_served = true;
+
+          break;
+        }
+      }
+
+      if (already_served) continue;
 
       bool shared = false;
       int fd = create_library_fd(line->lib_path, &shared);
@@ -969,6 +1106,8 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
       (*out)[*out_len].fd = fd;
       (*out)[*out_len].owned = !shared;
       (*out_len)++;
+
+      if (served_len < ZN_PLAN_DEDUP_MAX) served[served_len++] = lib_path_copy;
     }
   }
 

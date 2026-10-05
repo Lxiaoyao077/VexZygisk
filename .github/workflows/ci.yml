@@ -37,6 +37,63 @@ jobs:
           path: "build/out/VexZygisk-v*-debug.zip"
           archive: false
 
+      - name: Publish artifacts to Telegram
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_THREAD_ID: ${{ secrets.TG_THREAD_ID }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          COMMIT_TITLE: ${{ github.event.pull_request.title || github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # INFO: The bot exists only once its secrets do. An unconfigured fork
+          #       - and every pull request opened from one, where GitHub hands
+          #       out no secrets at all - skips this silently instead of
+          #       failing the build over a channel it does not have.
+          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
+            echo "::warning::Telegram secrets not configured, skipping publish"
+            exit 0
+          fi
+
+          zips=$(ls build/out/VexZygisk-v*-release.zip build/out/VexZygisk-v*-debug.zip 2>/dev/null || true)
+          if [ -z "$zips" ]; then
+            echo "::error::No build zips found in build/out"
+            exit 1
+          fi
+
+          escape_html() {
+            sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+          }
+
+          COMMIT_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$COMMIT_SHA"
+          title=$(escape_html <<< "$COMMIT_TITLE" | head -c 300)
+
+          for zip in $zips; do
+            name=$(escape_html <<< "$(basename "$zip" .zip)")
+
+            caption="<b>$name</b>"
+            if [ -n "$title" ]; then
+              caption+=$'\n'"<i>$title</i>"
+            fi
+            caption+=$'\n'"<a href=\"$COMMIT_URL\">commit</a> · <a href=\"$RUN_URL\">CI run</a>"
+
+            # INFO: A Telegram hiccup must not fail a build that already
+            #       produced its artifacts: warn and keep sending the rest.
+            http=$(curl -sS -o tg_response.json -w '%{http_code}' \
+              -F "chat_id=$TG_CHAT_ID" \
+              ${TG_THREAD_ID:+-F "message_thread_id=$TG_THREAD_ID"} \
+              -F "caption=$caption" \
+              -F "parse_mode=HTML" \
+              -F "document=@$zip" \
+              "https://api.telegram.org/bot$TG_BOT_TOKEN/sendDocument") || http="curl-failed"
+
+            if [ "$http" != "200" ]; then
+              echo "::warning::Telegram upload of $(basename "$zip") failed ($http): $(head -c 400 tg_response.json 2>/dev/null || true)"
+            fi
+          done
+
   host-test:
     # INFO: Kept on the same image as the build job so the suite a pull request
     #       runs is the one that will run on main, on the same OS release.

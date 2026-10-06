@@ -51,75 +51,125 @@ static bool is_module_map(const struct map_entry *map, dev_t data_dev) {
   return strncmp(path, ADB_PREFIX, sizeof(ADB_PREFIX) - 1) == 0;
 }
 
+/* INFO: One mapping selected for hiding, collected while the maps stream is
+         read and acted on after it has closed. A hidden process is a running
+         one: replacing a mapping with mremap splits and merges the vmas the
+         stream is still walking, and an entry read from a table that changed
+         under its reader describes a range this code would then mprotect or
+         remap blind - which is how a read-only remnant can land on memory as
+         unrelated as bionic's own atexit array and take a process tree down
+         with it (issue #30). */
+struct hide_target {
+  void *start;
+  size_t size;
+  int perms;
+  bool made_readable;
+  char *path;
+};
+
+struct hide_state {
+  dev_t data_dev;
+  struct hide_target *targets;
+  size_t count;
+  size_t capacity;
+};
+
+static bool collect_one_map(const struct map_entry *map, void *userdata) {
+  struct hide_state *state = userdata;
+
+  if (!is_module_map(map, state->data_dev)) return true;
+
+  if (state->count == state->capacity) {
+    size_t capacity = state->capacity == 0 ? 8 : state->capacity * 2;
+
+    struct hide_target *grown = realloc(state->targets, capacity * sizeof(struct hide_target));
+    if (grown == NULL) {
+      PLOGE("allocate the hide list");
+
+      return false;
+    }
+
+    state->targets = grown;
+    state->capacity = capacity;
+  }
+
+  struct hide_target *target = &state->targets[state->count];
+
+  target->start = (void *)map->start;
+  target->size = map->end - map->start;
+  target->perms = map->perms;
+  target->made_readable = (map->perms & PROT_READ) == 0;
+  target->path = strdup(map->path);
+
+  if (target->path == NULL) {
+    PLOGE("allocate the path of [%s]", map->path);
+
+    return false;
+  }
+
+  state->count++;
+
+  return true;
+}
+
 /* INFO: A module library that is still mapped - every one the loader abandons
          rather than unloads, and every Zygisk Next library the system linker
          holds - names its own file in /proc/self/maps. The mapping is replaced
          with an anonymous copy of the same bytes at the same address, so the
          library keeps running out of the same place and the name is gone. */
-static bool hide_map(const struct map_entry *map) {
-  size_t size = map->end - map->start;
-  bool made_readable = (map->perms & PROT_READ) == 0;
+static bool hide_map(struct hide_target *target) {
+  size_t size = target->size;
 
   void *copy = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
   if (copy == MAP_FAILED) {
-    PLOGE("allocate a copy of [%s]", map->path);
+    PLOGE("allocate a copy of [%s]", target->path);
 
     return false;
   }
 
   /* INFO: A mapping without PROT_READ cannot be copied out of, so it is made
             readable for the duration of the copy and put back afterwards. */
-  if (made_readable && mprotect((void *)map->start, size, map->perms | PROT_READ) == -1) {
-    PLOGE("make [%s] readable", map->path);
+  if (target->made_readable && mprotect(target->start, size, target->perms | PROT_READ) == -1) {
+    PLOGE("make [%s] readable", target->path);
 
     munmap(copy, size);
 
     return false;
   }
 
-  memcpy(copy, (void *)map->start, size);
+  memcpy(copy, target->start, size);
 
-  if (mremap(copy, size, size, MREMAP_MAYMOVE | MREMAP_FIXED, (void *)map->start) == MAP_FAILED) {
-    PLOGE("move the copy of [%s] over the original", map->path);
+  /* INFO: The copy receives its final permissions before it is moved into
+            place. A replacement that lands with the permissions it will keep
+            from its first byte needs no mprotect after the move - which is
+            the window where an executable segment of a running process is
+            neither executable nor writable, and where a second thread walking
+            memory can find a mapping that lies about itself. */
+  if (mprotect(copy, size, target->perms) == -1) {
+    PLOGE("set the permissions of the copy of [%s]", target->path);
+
+    if (target->made_readable && mprotect(target->start, size, target->perms) == -1)
+      PLOGE("restore the permissions of [%s]", target->path);
+
+    munmap(copy, size);
+
+    return false;
+  }
+
+  if (mremap(copy, size, size, MREMAP_MAYMOVE | MREMAP_FIXED, target->start) == MAP_FAILED) {
+    PLOGE("move the copy of [%s] over the original", target->path);
 
     munmap(copy, size);
 
     /* INFO: The original is still the mapping on this path, and it may still
               carry the PROT_READ added to copy it out of. */
-    if (made_readable && mprotect((void *)map->start, size, map->perms) == -1)
-      PLOGE("restore the permissions of [%s]", map->path);
+    if (target->made_readable && mprotect(target->start, size, target->perms) == -1)
+      PLOGE("restore the permissions of [%s]", target->path);
 
     return false;
   }
 
-  if (mprotect((void *)map->start, size, map->perms) == -1) {
-    PLOGE("restore the permissions of [%s]", map->path);
-
-    return false;
-  }
-
-  LOGD("Hid [%s]", map->path);
-
-  return true;
-}
-
-struct hide_state {
-  dev_t data_dev;
-  size_t maps;
-  size_t bytes;
-};
-
-static bool hide_one_map(const struct map_entry *map, void *userdata) {
-  struct hide_state *state = userdata;
-
-  if (!is_module_map(map, state->data_dev)) return true;
-
-  /* INFO: One library that cannot be replaced is not a reason to leave the
-            rest of them named. */
-  if (hide_map(map)) {
-    state->maps++;
-    state->bytes += map->end - map->start;
-  }
+  LOGD("Hid [%s]", target->path);
 
   return true;
 }
@@ -137,13 +187,33 @@ bool hide_module_maps(void) {
   /* INFO: The safe variant, as everywhere else in the loader: reading this
             process's own maps directly would leave a fresh access time on the
             file for the application to find. */
-  if (!scan_maps_safe("self", hide_one_map, &state)) {
+  if (!scan_maps_safe("self", collect_one_map, &state)) {
     LOGE("Failed to read the maps of this process");
 
     return false;
   }
 
-  if (state.maps > 0) LOGD("Hid %zu module map(s), %zu KiB", state.maps, state.bytes / 1024);
+  /* INFO: Nothing is hidden until the stream has closed and the child reading
+            the maps is gone: the entries above were collected from a table
+            that was still whole, and acting on them now cannot race the
+            reader that produced them. */
+  size_t maps = 0;
+  size_t bytes = 0;
+
+  for (size_t i = 0; i < state.count; i++) {
+    struct hide_target *target = &state.targets[i];
+
+    if (hide_map(target)) {
+      maps++;
+      bytes += target->size;
+    }
+
+    free(target->path);
+  }
+
+  free(state.targets);
+
+  if (maps > 0) LOGD("Hid %zu module map(s), %zu KiB", maps, bytes / 1024);
 
   return true;
 }

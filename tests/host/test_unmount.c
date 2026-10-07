@@ -217,10 +217,12 @@ static void check_system_covering_overlay(void) {
     return;
   }
 
-  /* INFO: The overlay a metamodule hangs below /system carries the root
-           solution's own source name, which is all the selection looks at.
-           The fixture is built from the flavour's own name so the KernelSU and
-           APatch builds both exercise the branch they ship. */
+  /* INFO: An overlay that covers a whole partition shares that partition's
+           target and its "/" root, so only the mount id separates the two. The
+           fixture covers that case on purpose: id 36 is the partition, 41 and 42
+           the overlays above it, and the source that has to come back for /system
+           is the partition's - never the overlay's solution name, which mount()
+           would refuse as a source. */
   fprintf(file,
           "36 1 7:0 / /system ro - erofs erofs ro\n"
           "41 36 0:52 /framework /system/framework ro - overlay %s ro\n"
@@ -234,27 +236,47 @@ static void check_system_covering_overlay(void) {
   if (all.len == 3) {
     CHECK(carries_root_trace(&all.items[1], NULL), "framework overlay not selected");
     CHECK(carries_root_trace(&all.items[2], NULL), "lib64 overlay not selected");
+
+    const char *source = find_partition_source(&all, "/system");
+    CHECK(source != NULL, "no own source found for /system");
+    if (source != NULL) {
+      CHECK(strcmp(source, "erofs") == 0,
+            "/system resolved to %s instead of the partition's own mount", source);
+    }
   }
 
   mount_list_free(&all);
   remove(path);
 }
 
-/* INFO: The revert must stay a detach. A hard umount2(target, 0) is what
-         removed the framework and provider overlays for real and left WebView
-         unable to initialize, so the call shape is pinned here rather than
-         left to review. */
-static void check_revert_stays_detached(void) {
-  printf("-- revert uses a lazy detach\n");
+/* INFO: The revert must never take a system partition's own filesystem down.
+         A hard umount2(target, 0) is what removed the framework and provider
+         overlays for real and left WebView unable to initialize; those paths
+         resolve through exactly these mount points, so tearing them down leaves
+         the process looking for files its own mountinfo still claims are there.
+         A system partition is rebound to its own source instead, and the detach
+         that rebind performs is the one place a detach is still correct: the
+         mount point is covered again immediately afterwards, so nothing
+         resolves through the gap it leaves.
+
+         Everything outside those partitions is unmounted for real, because a
+         detach there leaves the overlay instance alive for whoever still holds
+         a reference - which is the evidence a mount detector reads. */
+static void check_revert_call_shapes(void) {
+  printf("-- revert rebinds system partitions and unmounts the rest\n");
 
   char *source = read_unmount_source();
   CHECK(source != NULL, "cannot read " UNMOUNT_SOURCE_PATH);
   if (source == NULL) return;
 
-  CHECK(code_line_contains(source, "umount2(target, 0)") == false,
-        "revert must not escalate to a hard umount");
-  CHECK(code_line_contains(source, "umount2(target, MNT_DETACH)") == true,
-        "revert must detach the mount");
+  /* INFO: The system partition branch must reach the bind mount rather than a
+           bare detach, and the general branch must be a real unmount. Both are
+           pinned by shape so a later edit cannot quietly fall back to the
+           detached overlay this replaced. */
+  CHECK(code_line_contains(source, "mount(source, target, NULL, MS_BIND, NULL)") == true,
+        "a system partition must be rebound to its own source");
+  CHECK(code_line_contains(source, "umount2(target, 0)") == true,
+        "a non-system mount must be unmounted for real");
 
   free(source);
 }
@@ -314,7 +336,7 @@ int main(void) {
   check_system_covering_overlay();
   check_abort_refusals();
   check_id_ordering();
-  check_revert_stays_detached();
+  check_revert_call_shapes();
 
   if (g_failures == 0) {
     printf("all unmount checks passed\n");

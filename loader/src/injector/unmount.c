@@ -16,14 +16,11 @@
 #define PRODUCT_MOUNT "/product"
 
 /* INFO: The fields of one /proc/<pid>/mountinfo line. Only what the trace
-         selection, the unmount and the rebind need is kept: a magic mount over
-         a system partition is replaced by a bind mount of the partition's own
-         underlying source, and finding that source means looking for another
-         entry on the same device whose root is the top of the filesystem. */
+         selection, the unmount and the rebind need is kept. The id decides
+         which of two mounts on the same path is the lower one, which is how a
+         partition's own mount is told apart from the overlay hiding it. */
 struct mount_info {
   unsigned int id;
-  unsigned int major;
-  unsigned int minor;
   char *root;
   char *target;
   char *source;
@@ -90,11 +87,9 @@ static bool mount_info_parse(char *line, struct mount_info *out) {
   /* INFO: The parent id is skipped. The device is kept: it is what tells a
             partition's own root apart from the overlays stacked on top of it. */
   unsigned int id = 0;
-  unsigned int major = 0;
-  unsigned int minor = 0;
   char root[4096], target[4096], source[4096], type[128];
 
-  if (sscanf(line, "%u %*u %u:%u %4095s %4095s", &id, &major, &minor, root, target) != 5) {
+  if (sscanf(line, "%u %*u %*u:%*u %4095s %4095s", &id, root, target) != 3) {
     LOGV("Skipping malformed mountinfo line: %s", line);
 
     return false;
@@ -107,8 +102,6 @@ static bool mount_info_parse(char *line, struct mount_info *out) {
   }
 
   out->id = id;
-  out->major = major;
-  out->minor = minor;
   out->root = strdup(root);
   out->target = strdup(target);
   out->source = strdup(source);
@@ -213,32 +206,31 @@ static bool carries_root_trace(const struct mount_info *info, const char *loop_s
 
 /* INFO: The source a system partition's own mount reads from, found among the
          entries already collected. A magic mount adds an overlay on top of that
-         mount; underneath, the same device still carries the filesystem root,
-         which is the entry whose root is "/" and whose target is the partition
-         itself.
+         mount; underneath, the partition's own filesystem is still there.
 
-         That entry's source is what a bind mount has to name. It comes back as a
-         path ("/dev/block/dm-0" style) or as a device node, both usable in a
-         bind mount the same way. NULL when the partition's own mount is already
-         gone or obscured, in which case there is nothing to restore and the
-         caller falls back to detaching. */
+         The lowest mount id wins, and that is what makes this correct rather
+         than merely likely: an overlay covering /system has the same target and
+         the same "/" root as the partition it hides, so the target alone cannot
+         tell the two apart. Mount ids are handed out in mount order, so the
+         lowest id on a target is the one that was mounted first - the layer
+         everything else was stacked on. Picking the overlay instead would hand
+         its source, a bare solution name like "KSU", to mount() and fail. */
 static const char *find_partition_source(const struct mount_list *all, const char *target) {
-  const struct mount_info *own = NULL;
+  const struct mount_info *bottom = NULL;
 
   for (size_t i = 0; i < all->len; i++) {
     const struct mount_info *info = &all->items[i];
 
     if (strcmp(info->target, target) != 0) continue;
 
-    /* INFO: The filesystem root itself, as opposed to a subdirectory bind of
-              it - that one has a non-"/" root and does not describe the whole
-              partition. */
-    if (strcmp(info->root, "/") == 0) return info->source;
+    /* INFO: A bind of a subdirectory has a non-"/" root and does not describe
+              the whole partition, so it cannot stand in for one. */
+    if (strcmp(info->root, "/") != 0) continue;
 
-    if (own == NULL) own = info;
+    if (bottom == NULL || info->id < bottom->id) bottom = info;
   }
 
-  return own != NULL ? own->source : NULL;
+  return bottom != NULL ? bottom->source : NULL;
 }
 
 /* INFO: Replaces a system partition's overlay with a bind mount of the
@@ -257,6 +249,8 @@ static const char *find_partition_source(const struct mount_list *all, const cha
          underneath keep resolving because they are backed by the very same
          filesystem the process was already using. */
 static bool rebind_partition(const char *target, const char *source) {
+  if (target == NULL || source == NULL) return false;
+
   /* INFO: The overlay has to come off first: a bind mount stacks on the mount
             point, so leaving it in place would put the filesystem underneath
             back under the very overlay being hidden. MNT_DETACH is right here -

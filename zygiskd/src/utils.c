@@ -657,6 +657,10 @@ void stringify_root_impl_name(struct root_impl impl, char *restrict output) {
 /* INFO: Only the fields consumed by umount_root are kept: the mount point
          itself plus the source and root it matches against. */
 struct mountinfo {
+  /* INFO: The mount id is what tells the partition's own mount from the overlay
+           hiding it: both carry the same target and the same "/" root, and only
+           the order they were mounted in separates them. */
+  unsigned int id;
   char *root;
   char *target;
   char *source;
@@ -689,14 +693,16 @@ static bool mountinfo_parse_line(char *line, struct mountinfo *out) {
 
   *separator = '\0';
 
+  unsigned int id = 0;
   char root[4096], target[4096], source[4096], type[128];
 
-  if (sscanf(line, "%*u %*u %*u:%*u %4095s %4095s", root, target) != 2) return false;
+  if (sscanf(line, "%u %*u %*u:%*u %4095s %4095s", &id, root, target) != 3) return false;
 
   /* INFO: After the separator come the filesystem type and the source; some
             pseudo-filesystems carry no source and cannot be a root mount. */
   if (sscanf(separator + 3, "%127s %4095s", type, source) != 2) return false;
 
+  out->id = id;
   out->root = strdup(root);
   out->target = strdup(target);
   out->source = strdup(source);
@@ -818,19 +824,18 @@ static const char *find_module_loop_source(const struct mountinfos *all) {
          NULL when the partition's own mount is already gone, in which case
          there is nothing to restore. */
 static const char *find_partition_source(const struct mountinfos *all, const char *target) {
-  const struct mountinfo *own = NULL;
+  const struct mountinfo *bottom = NULL;
 
   for (size_t i = 0; i < all->length; i++) {
     const struct mountinfo *info = &all->mounts[i];
 
     if (strcmp(info->target, target) != 0) continue;
+    if (strcmp(info->root, "/") != 0) continue;
 
-    if (strcmp(info->root, "/") == 0) return info->source;
-
-    if (own == NULL) own = info;
+    if (bottom == NULL || info->id < bottom->id) bottom = info;
   }
 
-  return own != NULL ? own->source : NULL;
+  return bottom != NULL ? bottom->source : NULL;
 }
 
 /* INFO: Puts a system partition's own filesystem back where a magic mount put
@@ -843,6 +848,8 @@ static const char *find_partition_source(const struct mountinfos *all, const cha
          framework resolves through these very paths. A bind mount keeps them
          resolving - same filesystem, no overlay above it. */
 static bool rebind_partition(const char *target, const char *source) {
+  if (target == NULL || source == NULL) return false;
+
   if (umount2(target, MNT_DETACH) != 0) {
     LOGW("Failed detaching %s before rebinding it: %s", target, strerror(errno));
 

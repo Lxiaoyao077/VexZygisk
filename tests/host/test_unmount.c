@@ -249,34 +249,33 @@ static void check_system_covering_overlay(void) {
   remove(path);
 }
 
-/* INFO: The revert must never take a system partition's own filesystem down.
-         A hard umount2(target, 0) is what removed the framework and provider
-         overlays for real and left WebView unable to initialize; those paths
-         resolve through exactly these mount points, so tearing them down leaves
-         the process looking for files its own mountinfo still claims are there.
-         A system partition is rebound to its own source instead, and the detach
-         that rebind performs is the one place a detach is still correct: the
-         mount point is covered again immediately afterwards, so nothing
-         resolves through the gap it leaves.
+/* INFO: A system partition must never be unmounted for real. A hard
+         umount2(target, 0) is what removed the framework and provider overlays
+         and left WebView unable to initialize; those paths resolve through
+         exactly these mount points, so tearing them down leaves the process
+         looking for files its own mountinfo still claims are there. A system
+         partition is rebound to its own source instead.
 
-         Everything outside those partitions is unmounted for real, because a
-         detach there leaves the overlay instance alive for whoever still holds
-         a reference - which is the evidence a mount detector reads. */
+         Everything outside those partitions keeps the lazy detach, for the same
+         reason one step further out: a hard unmount there hangs the root
+         manager, which walks into the mounts it just removed. Only the rebind
+         may perform a real mount syscall, and the test pins both shapes so a
+         later edit cannot quietly widen either. */
 static void check_revert_call_shapes(void) {
-  printf("-- revert rebinds system partitions and unmounts the rest\n");
+  printf("-- system partitions rebind, the rest detach\n");
 
   char *source = read_unmount_source();
   CHECK(source != NULL, "cannot read " UNMOUNT_SOURCE_PATH);
   if (source == NULL) return;
 
-  /* INFO: The system partition branch must reach the bind mount rather than a
-           bare detach, and the general branch must be a real unmount. Both are
-           pinned by shape so a later edit cannot quietly fall back to the
-           detached overlay this replaced. */
+  /* INFO: No hard unmount anywhere in the revert: the one place a real mount
+           syscall belongs is the bind that replaces a partition's overlay. */
+  CHECK(code_line_contains(source, "umount2(target, 0)") == false,
+        "the revert must not escalate to a hard umount");
   CHECK(code_line_contains(source, "mount(source, target, NULL, MS_BIND, NULL)") == true,
         "a system partition must be rebound to its own source");
-  CHECK(code_line_contains(source, "umount2(target, 0)") == true,
-        "a non-system mount must be unmounted for real");
+  CHECK(code_line_contains(source, "umount2(target, MNT_DETACH)") == true,
+        "everything outside a system partition must stay detached");
 
   free(source);
 }

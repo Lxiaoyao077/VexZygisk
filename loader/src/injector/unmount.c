@@ -383,15 +383,20 @@ bool revert_root_traces_here(void) {
   for (size_t i = 0; i < traces.len; i++) {
     const char *target = traces.items[i].target;
 
-    /* INFO: A system partition is rebound to its own source instead of being
-              unmounted; see rebind_system_partition for why a real unmount is
-              not available there and a lazy detach is not enough.
+    /* INFO: Only a system partition is rebound. Everything else keeps the lazy
+              detach, and that is deliberate: a hard unmount there was tried and
+              it breaks the manager. Opening an app from KernelSU's manager hangs
+              when its mounts are torn down for real, because the manager walks
+              into the mounts it just removed - the overlay it tore down is still
+              on the namespace the next step resolves through, so the lookup goes
+              to a path that no longer has a filesystem behind it.
 
-              Everything else is unmounted for real now. The detach this used to
-              do everywhere left the overlay instance alive and referenced, which
-              is what a mount detector reads as a magic mount that still applies
-              - so on these paths it was hiding the mount point while leaving
-              the evidence behind. */
+              The detach leaves that overlay alive, so this is a tradeoff rather
+              than a clean fix: a detector can still read an overlay covering a
+              non-system path. System partitions are the ones a magic mount
+              actually rewrites, and those are the ones now handled properly;
+              the rest are left alone because breaking the manager costs more than
+              the traces it would save. */
     bool reverted;
 
     if (mount_path_on_system_partition(target)) {
@@ -405,7 +410,7 @@ bool revert_root_traces_here(void) {
         LOGW("No own mount found for %s, detaching it instead: %s", target, strerror(errno));
       }
     } else {
-      reverted = umount2(target, 0) == 0;
+      reverted = umount2(target, MNT_DETACH) == 0;
     }
 
     if (reverted) {

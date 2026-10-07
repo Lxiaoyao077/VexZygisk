@@ -934,7 +934,8 @@ bool umount_root(void) {
               and a live overlay on a system partition is exactly what a mount
               detector reports as a magic mount that still applies.
 
-              Everything else is unmounted for real, for the same reason. */
+              Anything else keeps the lazy detach, as does the loader: a hard
+              unmount outside a system partition hangs the root manager. */
     if (mount_path_on_system_partition(target)) {
       const char *source = find_partition_source(&mounts, target);
 
@@ -953,13 +954,19 @@ bool umount_root(void) {
       continue;
     }
 
-    if (umount2(target, 0) == -1) {
-      LOGE("[%s] Failed to unmount %s: %s", source_name, target, strerror(errno));
+    /* INFO: Everything outside a system partition keeps the lazy detach. A hard
+              unmount there hangs the root manager: opening an app walks into the
+              mounts that were just torn down, on a namespace whose overlays are
+              still mounted above the hole. A detector can still read an overlay
+              over a non-system path, but breaking the manager costs more than
+              those traces are worth. */
+    if (umount2(target, MNT_DETACH) == -1) {
+      LOGE("[%s] Failed to detach %s: %s", source_name, target, strerror(errno));
 
       continue;
     }
 
-    LOGI("[%s] Unmounted %s", source_name, target);
+    LOGI("[%s] Detached %s", source_name, target);
   }
 
   free(targets_to_unmount);

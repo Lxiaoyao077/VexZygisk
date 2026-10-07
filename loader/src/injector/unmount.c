@@ -16,9 +16,14 @@
 #define PRODUCT_MOUNT "/product"
 
 /* INFO: The fields of one /proc/<pid>/mountinfo line. Only what the trace
-         selection and the unmount actually need is kept. */
+         selection, the unmount and the rebind need is kept: a magic mount over
+         a system partition is replaced by a bind mount of the partition's own
+         underlying source, and finding that source means looking for another
+         entry on the same device whose root is the top of the filesystem. */
 struct mount_info {
   unsigned int id;
+  unsigned int major;
+  unsigned int minor;
   char *root;
   char *target;
   char *source;
@@ -82,12 +87,14 @@ static bool mount_info_parse(char *line, struct mount_info *out) {
 
   *separator = '\0';
 
-  /* INFO: The parent id and the "major:minor" device are skipped, nothing
-            here needs them. */
+  /* INFO: The parent id is skipped. The device is kept: it is what tells a
+            partition's own root apart from the overlays stacked on top of it. */
   unsigned int id = 0;
+  unsigned int major = 0;
+  unsigned int minor = 0;
   char root[4096], target[4096], source[4096], type[128];
 
-  if (sscanf(line, "%u %*u %*u:%*u %4095s %4095s", &id, root, target) != 3) {
+  if (sscanf(line, "%u %*u %u:%u %4095s %4095s", &id, &major, &minor, root, target) != 5) {
     LOGV("Skipping malformed mountinfo line: %s", line);
 
     return false;
@@ -100,6 +107,8 @@ static bool mount_info_parse(char *line, struct mount_info *out) {
   }
 
   out->id = id;
+  out->major = major;
+  out->minor = minor;
   out->root = strdup(root);
   out->target = strdup(target);
   out->source = strdup(source);
@@ -202,6 +211,82 @@ static bool carries_root_trace(const struct mount_info *info, const char *loop_s
   return loop_source != NULL && strcmp(info->source, loop_source) == 0;
 }
 
+/* INFO: The source a system partition's own mount reads from, found among the
+         entries already collected. A magic mount adds an overlay on top of that
+         mount; underneath, the same device still carries the filesystem root,
+         which is the entry whose root is "/" and whose target is the partition
+         itself.
+
+         That entry's source is what a bind mount has to name. It comes back as a
+         path ("/dev/block/dm-0" style) or as a device node, both usable in a
+         bind mount the same way. NULL when the partition's own mount is already
+         gone or obscured, in which case there is nothing to restore and the
+         caller falls back to detaching. */
+static const char *find_partition_source(const struct mount_list *all, const char *target) {
+  const struct mount_info *own = NULL;
+
+  for (size_t i = 0; i < all->len; i++) {
+    const struct mount_info *info = &all->items[i];
+
+    if (strcmp(info->target, target) != 0) continue;
+
+    /* INFO: The filesystem root itself, as opposed to a subdirectory bind of
+              it - that one has a non-"/" root and does not describe the whole
+              partition. */
+    if (strcmp(info->root, "/") == 0) return info->source;
+
+    if (own == NULL) own = info;
+  }
+
+  return own != NULL ? own->source : NULL;
+}
+
+/* INFO: Replaces a system partition's overlay with a bind mount of the
+         partition's own source, so the partition reads as it did before the
+         module system touched it.
+
+         Unmounting one of these for real is not an option: the framework and
+         provider resources resolve through exactly these paths, so tearing the
+         mount down leaves the process looking for files its own mountinfo still
+         claims are there. That is why the previous code settled for MNT_DETACH,
+         which hides the mount from the tree but leaves the overlay instance
+         alive - and a live instance is precisely what a mount detector finds.
+
+         A bind mount has neither problem. The overlay is replaced rather than
+         detached, so nothing of it survives to be read back, and the paths
+         underneath keep resolving because they are backed by the very same
+         filesystem the process was already using. */
+static bool rebind_partition(const char *target, const char *source) {
+  /* INFO: The overlay has to come off first: a bind mount stacks on the mount
+            point, so leaving it in place would put the filesystem underneath
+            back under the very overlay being hidden. MNT_DETACH is right here -
+            this mount is about to be covered, so nothing resolves through it
+            afterwards and nothing can be left pointing at the hole. */
+  if (umount2(target, MNT_DETACH) != 0) {
+    LOGW("Failed detaching %s before rebinding it: %s", target, strerror(errno));
+
+    return false;
+  }
+
+  if (mount(source, target, NULL, MS_BIND, NULL) != 0) {
+    LOGW("Failed rebinding %s from %s: %s", target, source, strerror(errno));
+
+    /* INFO: Put something back so the partition is not left unmounted, which
+              would be a worse state than the one the detach started from. The
+              overlay is gone by now, so the partition's own source is the best
+              available stand-in and the framework keeps resolving. */
+    if (mount(source, target, NULL, MS_BIND, NULL) != 0) {
+      LOGE("Failed restoring %s after a failed rebind: %s", target, strerror(errno));
+    }
+
+    return false;
+  }
+
+  LOGV("Reverted %s by rebinding it from %s", target, source);
+
+  return true;
+}
+
 static int compare_by_id_descending(const void *a, const void *b) {
   const struct mount_info *left = (const struct mount_info *)a;
   const struct mount_info *right = (const struct mount_info *)b;
@@ -287,13 +372,12 @@ bool revert_root_traces_here(void) {
     traces.len++;
   }
 
-  mount_list_free(&all);
-
   if (abort_zygote_unmount(&traces)) {
     /* INFO: Refused, not failed. The caller falls back to the clean
               namespace, which hides the mounts by moving the process into a
               namespace that never had them. */
     mount_list_free(&traces);
+    mount_list_free(&all);
 
     return false;
   }
@@ -305,20 +389,32 @@ bool revert_root_traces_here(void) {
   for (size_t i = 0; i < traces.len; i++) {
     const char *target = traces.items[i].target;
 
-    /* INFO: MNT_DETACH, deliberately. A detached mount disappears from this
-              namespace's mount tree while the filesystem instance stays alive
-              for whoever already holds a reference, which is exactly what
-              hiding a trace is meant to mean: the paths stop resolving to the
-              overlay, yet nothing built on top of it is torn down. A plain
-              umount2(target, 0) reaches further than that. Root solution
-              overlays carry the source name of the solution and, on a
-              metamodule setup, cover system paths as well - framework and
-              provider resources among them - so unmounting one for real
-              leaves WebView looking at a path its own mountinfo still claims
-              is overlaid and it fails to initialize, which surfaces as blank
-              module WebUIs. The lazy detach hides the same set without
-              breaking them. */
-    if (umount2(target, MNT_DETACH) == 0) {
+    /* INFO: A system partition is rebound to its own source instead of being
+              unmounted; see rebind_system_partition for why a real unmount is
+              not available there and a lazy detach is not enough.
+
+              Everything else is unmounted for real now. The detach this used to
+              do everywhere left the overlay instance alive and referenced, which
+              is what a mount detector reads as a magic mount that still applies
+              - so on these paths it was hiding the mount point while leaving
+              the evidence behind. */
+    bool reverted;
+
+    if (mount_path_on_system_partition(target)) {
+      /* INFO: Resolved before `all` is released below, since that is where the
+                entry naming this partition's own source lives. */
+      const char *source = find_partition_source(&all, target);
+
+      reverted = source != NULL ? rebind_partition(target, source)
+                                 : umount2(target, MNT_DETACH) == 0;
+      if (!reverted) {
+        LOGW("No own mount found for %s, detaching it instead: %s", target, strerror(errno));
+      }
+    } else {
+      reverted = umount2(target, 0) == 0;
+    }
+
+    if (reverted) {
       LOGV("Reverted %s (mount id %u)", target, traces.items[i].id);
 
       continue;
@@ -329,6 +425,8 @@ bool revert_root_traces_here(void) {
     complete = false;
   }
 
+  /* INFO: Only now, once every rebind has taken the source it needed out of it. */
+  mount_list_free(&all);
   mount_list_free(&traces);
 
   /* INFO: A partial revert still returns false, so the caller can fall back

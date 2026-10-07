@@ -811,6 +811,57 @@ static const char *find_module_loop_source(const struct mountinfos *all) {
   return NULL;
 }
 
+/* INFO: The source a system partition's own mount reads from, found among the
+         entries already collected. A magic mount adds an overlay on top of that
+         mount; underneath, the same filesystem root is still there, and that is
+         the entry whose root is "/". Its source is what a bind mount names.
+         NULL when the partition's own mount is already gone, in which case
+         there is nothing to restore. */
+static const char *find_partition_source(const struct mountinfos *all, const char *target) {
+  const struct mountinfo *own = NULL;
+
+  for (size_t i = 0; i < all->length; i++) {
+    const struct mountinfo *info = &all->mounts[i];
+
+    if (strcmp(info->target, target) != 0) continue;
+
+    if (strcmp(info->root, "/") == 0) return info->source;
+
+    if (own == NULL) own = info;
+  }
+
+  return own != NULL ? own->source : NULL;
+}
+
+/* INFO: Puts a system partition's own filesystem back where a magic mount put
+         an overlay, by binding that filesystem over the mount point.
+
+         The overlay is replaced rather than detached: a detach leaves the
+         overlay instance alive and referenced, and a live overlay on /system or
+         /vendor is what a mount detector reports as a magic mount that still
+         applies. Unmounting it outright is not available either, since the
+         framework resolves through these very paths. A bind mount keeps them
+         resolving - same filesystem, no overlay above it. */
+static bool rebind_partition(const char *target, const char *source) {
+  if (umount2(target, MNT_DETACH) != 0) {
+    LOGW("Failed detaching %s before rebinding it: %s", target, strerror(errno));
+
+    return false;
+  }
+
+  if (mount(source, target, NULL, MS_BIND, NULL) != 0) {
+    LOGW("Failed rebinding %s from %s: %s", target, source, strerror(errno));
+
+    if (mount(source, target, NULL, MS_BIND, NULL) != 0) {
+      LOGE("Failed restoring %s after a failed rebind: %s", target, strerror(errno));
+    }
+
+    return false;
+  }
+
+  return true;
+}
+
 bool umount_root(void) {
   /* INFO: This runs in a child that already setns'ed into the target pid's
             mount namespace, so "self" here is the namespace to clean. */
@@ -868,15 +919,34 @@ bool umount_root(void) {
   for (size_t i = num_targets; i > 0; i--) {
     const char *target = targets_to_unmount[i - 1];
 
-    /* INFO: MNT_DETACH, for the same reason the loader reverts through it:
-               detaching hides the mount from this namespace without tearing
-               the filesystem instance down, so an overlay that a root solution
-               named after itself can cover system paths and still leave the
-               framework and provider resources that WebView resolves through
-               them intact. A plain umount2(target, 0) does tear it down and
-               leaves those lookups pointing at a path the process's own
-               mountinfo still reports as overlaid. */
-    if (umount2(target, MNT_DETACH) == -1) {
+    /* INFO: A magic mount over a system partition is rebound to that
+              partition's own source rather than unmounted, matching what the
+              loader does in place. Unmounting one for real takes the framework's
+              own view of /system with it; detaching it, which is what both
+              sides used to do, leaves the overlay instance alive and referenced,
+              and a live overlay on a system partition is exactly what a mount
+              detector reports as a magic mount that still applies.
+
+              Everything else is unmounted for real, for the same reason. */
+    if (mount_path_on_system_partition(target)) {
+      const char *source = find_partition_source(&mounts, target);
+
+      if (source != NULL && rebind_partition(target, source)) {
+        LOGI("[%s] Rebound %s from %s", source_name, target, source);
+
+        continue;
+      }
+
+      /* INFO: Nothing to rebind from, so the mount point at least stops
+                resolving to the overlay. */
+      if (umount2(target, MNT_DETACH) == -1) {
+        LOGE("[%s] Failed to detach %s: %s", source_name, target, strerror(errno));
+      }
+
+      continue;
+    }
+
+    if (umount2(target, 0) == -1) {
       LOGE("[%s] Failed to unmount %s: %s", source_name, target, strerror(errno));
 
       continue;

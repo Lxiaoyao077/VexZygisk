@@ -272,8 +272,8 @@ static void check_revert_call_shapes(void) {
            syscall belongs is the bind that replaces a partition's overlay. */
   CHECK(code_line_contains(source, "umount2(target, 0)") == false,
         "the revert must not escalate to a hard umount");
-  CHECK(code_line_contains(source, "mount(source, target, NULL, MS_BIND, NULL)") == true,
-        "a system partition must be rebound to its own source");
+  CHECK(code_line_contains(source, "mount(source, target, NULL, MS_BIND | MS_REC, NULL)") == true,
+        "a system partition must be rebound recursively to its own source");
   CHECK(code_line_contains(source, "umount2(target, MNT_DETACH)") == true,
         "everything outside a system partition must stay detached");
 

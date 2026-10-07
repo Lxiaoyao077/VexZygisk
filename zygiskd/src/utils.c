@@ -846,7 +846,12 @@ static const char *find_partition_source(const struct mountinfos *all, const cha
          /vendor is what a mount detector reports as a magic mount that still
          applies. Unmounting it outright is not available either, since the
          framework resolves through these very paths. A bind mount keeps them
-         resolving - same filesystem, no overlay above it. */
+         resolving - same filesystem, no overlay above it.
+
+         Recursive, because /system/framework and /system/lib64 are mounts in
+         their own right under /system: a plain bind would replace the mount
+         point without carrying them along, and the process would lose the
+         resources it resolves through them. */
 static bool rebind_partition(const char *target, const char *source) {
   if (target == NULL || source == NULL) return false;
 
@@ -856,10 +861,10 @@ static bool rebind_partition(const char *target, const char *source) {
     return false;
   }
 
-  if (mount(source, target, NULL, MS_BIND, NULL) != 0) {
+  if (mount(source, target, NULL, MS_BIND | MS_REC, NULL) != 0) {
     LOGW("Failed rebinding %s from %s: %s", target, source, strerror(errno));
 
-    if (mount(source, target, NULL, MS_BIND, NULL) != 0) {
+    if (mount(source, target, NULL, MS_BIND | MS_REC, NULL) != 0) {
       LOGE("Failed restoring %s after a failed rebind: %s", target, strerror(errno));
     }
 

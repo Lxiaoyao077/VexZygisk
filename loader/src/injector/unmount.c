@@ -247,7 +247,15 @@ static const char *find_partition_source(const struct mount_list *all, const cha
          A bind mount has neither problem. The overlay is replaced rather than
          detached, so nothing of it survives to be read back, and the paths
          underneath keep resolving because they are backed by the very same
-         filesystem the process was already using. */
+         filesystem the process was already using.
+
+         The bind is recursive, which matters on Android: /system/framework and
+         /system/lib64 are mounts in their own right under /system, not
+         subdirectories of it. A plain bind replaces the mount point without
+         carrying its children along, so every one of those would go missing and
+         the process would fail to resolve the resources it resolves through
+         them - the same failure the unmount this avoids caused, arrived at from
+         the other side. */
 static bool rebind_partition(const char *target, const char *source) {
   if (target == NULL || source == NULL) return false;
 
@@ -262,14 +270,14 @@ static bool rebind_partition(const char *target, const char *source) {
     return false;
   }
 
-  if (mount(source, target, NULL, MS_BIND, NULL) != 0) {
+  if (mount(source, target, NULL, MS_BIND | MS_REC, NULL) != 0) {
     LOGW("Failed rebinding %s from %s: %s", target, source, strerror(errno));
 
     /* INFO: Put something back so the partition is not left unmounted, which
               would be a worse state than the one the detach started from. The
               overlay is gone by now, so the partition's own source is the best
               available stand-in and the framework keeps resolving. */
-    if (mount(source, target, NULL, MS_BIND, NULL) != 0) {
+    if (mount(source, target, NULL, MS_BIND | MS_REC, NULL) != 0) {
       LOGE("Failed restoring %s after a failed rebind: %s", target, strerror(errno));
     }
 

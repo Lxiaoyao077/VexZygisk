@@ -8,9 +8,29 @@
           side alone would leave them disagreeing and a process half hidden. The
           walk itself stays per-binary, since only the loader needs the mount id. */
 
+#include <stdbool.h>
+#include <string.h>
+
 #define MOUNT_SOURCE_LOOP "/dev/block/loop"
 #define ROOT_MODULES_DIR "/data/adb/modules"
 #define ROOT_MODULES_ROOT "/adb/modules"
+
+/* INFO: True when `path` equals `prefix` or sits directly underneath it (the
+          next byte is '/'). A bare prefix test would also match a sibling such
+          as /data/adb/modules_extra, which must never be reverted. It lives
+          here rather than in either walker because both decide from it which
+          mounts a process loses: a set that differs by one path leaves the
+          process half hidden, which is the disagreement this header exists to
+          prevent. */
+static inline bool mount_path_at_or_under(const char *path, const char *prefix) {
+  size_t len = strlen(prefix);
+
+  if (strncmp(path, prefix, len) != 0) return false;
+
+  char next = path[len];
+
+  return next == '\0' || next == '/';
+}
 
 /* INFO: The overlay source each root solution reports: KernelSU mounts as
          "KSU" and APatch, being KernelPatch based, as "APatch" or "kpatch".

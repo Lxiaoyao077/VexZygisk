@@ -178,19 +178,6 @@ static const char *find_module_loop_source(const struct mount_list *all) {
   return NULL;
 }
 
-/* INFO: True when `path` equals `prefix` or sits directly underneath it (the
-         next byte is '/'). A bare prefix test would also match a sibling such
-         as /data/adb/modules_extra, which must never be reverted. */
-static bool mount_path_at_or_under(const char *path, const char *prefix) {
-  size_t len = strlen(prefix);
-
-  if (strncmp(path, prefix, len) != 0) return false;
-
-  char next = path[len];
-
-  return next == '\0' || next == '/';
-}
-
 static bool carries_root_trace(const struct mount_info *info, const char *loop_source) {
   if (mount_path_at_or_under(info->root, ROOT_MODULES_ROOT)) return true;
   if (mount_path_at_or_under(info->target, ROOT_MODULES_DIR)) return true;
@@ -279,7 +266,12 @@ bool revert_root_traces_here(void) {
     traces.items[traces.len] = all.items[i];
 
     /* INFO: The entry now belongs to the trace list, detaching it keeps the
-              cleanup below from freeing it twice. */
+              cleanup below from freeing it twice. From here on the strings it
+              named are gone from `all` while `all.len` still counts the entry,
+              so it reads back as a NULL target: anything that has to look at
+              the whole table must run before this loop, and none of it after.
+              (`all` is released on the next statement, which is what makes the
+              hand-over safe - keep it that way.) */
     all.items[i].root = NULL;
     all.items[i].target = NULL;
     all.items[i].source = NULL;

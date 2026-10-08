@@ -802,19 +802,6 @@ bool parse_mountinfo(const char *restrict pid, struct mountinfos *restrict mount
     return false;
 }
 
-/* INFO: True when `path` equals `prefix` or sits directly underneath it (the
-         next byte is '/'). A bare prefix test would also match a sibling such
-         as /data/adb/modules_extra, which must never be unmounted. */
-static bool mount_path_at_or_under(const char *path, const char *prefix) {
-  size_t len = strlen(prefix);
-
-  if (strncmp(path, prefix, len) != 0) return false;
-
-  char next = path[len];
-
-  return next == '\0' || next == '/';
-}
-
 /* INFO: KernelSU keeps its modules on a loop device, and that device name
          shows up as the source of every module mount. APatch overlays them
          instead, so only the KernelSU flavour looks for it. Without this the
@@ -905,12 +892,12 @@ bool umount_root(void) {
                leaves those lookups pointing at a path the process's own
                mountinfo still reports as overlaid. */
     if (umount2(target, MNT_DETACH) == -1) {
-      LOGE("[%s] Failed to unmount %s: %s", source_name, target, strerror(errno));
+      LOGE("[%s] Failed to detach %s: %s", source_name, target, strerror(errno));
 
       continue;
     }
 
-    LOGI("[%s] Unmounted %s", source_name, target);
+    LOGI("[%s] Detached %s", source_name, target);
   }
 
   free(targets_to_unmount);

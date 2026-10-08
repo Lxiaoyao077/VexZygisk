@@ -264,7 +264,7 @@ static void check_revert_stays_detached(void) {
 static void check_abort_refusals(void) {
   printf("-- /product abort refusals\n");
 
-  struct mount_info entries[3];
+  struct mount_info entries[3] = { 0 };
   struct mount_list traces = { .items = entries, .len = 0, .cap = 3 };
 
   /* INFO: An empty trace list means "nothing to do", which is an abort. */
@@ -272,8 +272,6 @@ static void check_abort_refusals(void) {
 
   entries[0].target = "/product/bin";
   entries[1].target = "/system";
-  entries[1].root = strdup("/");
-  entries[1].source = strdup("erofs");
   traces.len = 1;
   CHECK(!abort_zygote_unmount(&traces), "/product/bin alone must not abort");
 
@@ -284,15 +282,12 @@ static void check_abort_refusals(void) {
   /* INFO: Overlays *under* /product but not /product itself are fine. */
   traces.items[1].target = "/product/overlay/lib";
   CHECK(!abort_zygote_unmount(&traces), "overlay below /product must not abort");
-
-  free(entries[1].root);
-  free(entries[1].source);
 }
 
 static void check_id_ordering(void) {
   printf("-- descending mount id ordering\n");
 
-  struct mount_info entries[3];
+  struct mount_info entries[3] = { 0 };
   struct mount_list traces = { .items = entries, .len = 3, .cap = 3 };
 
   for (size_t i = 0; i < 3; i++) {
@@ -309,11 +304,40 @@ static void check_id_ordering(void) {
         traces.items[0].id, traces.items[1].id, traces.items[2].id);
 }
 
+/* INFO: The boundary rule a trace path is selected by lives in root_mounts.h,
+         now shared by the loader and the daemon instead of written out in each.
+         Pinned here because both sides decide from it what a process loses: a
+         prefix that matches one byte too many would revert a sibling directory
+         such as /data/adb/modules_extra, and one that matches one too few would
+         leave the module mounts of a real installation behind. */
+static void check_path_boundaries(void) {
+  printf("-- trace path boundaries\n");
+
+  CHECK(mount_path_at_or_under(ROOT_MODULES_DIR, ROOT_MODULES_DIR),
+        "the prefix itself must match");
+
+  CHECK(mount_path_at_or_under("/data/adb/modules/violet/system", ROOT_MODULES_DIR),
+        "a path below the prefix must match");
+
+  CHECK(mount_path_at_or_under("/adb/modules/violet", ROOT_MODULES_ROOT),
+        "a module root below the prefix must match");
+
+  CHECK(!mount_path_at_or_under("/data/adb/modules_extra", ROOT_MODULES_DIR),
+        "a sibling sharing the prefix text must not match");
+
+  CHECK(!mount_path_at_or_under("/adb/modules_backup/violet", ROOT_MODULES_ROOT),
+        "a sibling below a longer name must not match");
+
+  CHECK(!mount_path_at_or_under("/system", ROOT_MODULES_DIR),
+        "an unrelated path must not match");
+}
+
 int main(void) {
   check_parse_and_select();
   check_system_covering_overlay();
   check_abort_refusals();
   check_id_ordering();
+  check_path_boundaries();
   check_revert_stays_detached();
 
   if (g_failures == 0) {

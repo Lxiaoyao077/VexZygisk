@@ -319,7 +319,29 @@ bool module_maps_hidden(void) {
   return module_maps_were_hidden;
 }
 
+/* INFO: TEMPORARY - this build replaces nothing.
+
+         A hidden process differs from an ordinary one in two ways at once: the
+         module libraries name their files in their maps, and something has
+         replaced the mappings that did. The detectors this is being compared
+         against react to different halves of that, so this build removes the
+         second half only. Everything below is the production path, untouched -
+         this is the single switch between the two behaviours, and setting it
+         back to true restores them exactly. */
+static bool hiding_enabled = false;
+
 bool hide_module_maps(void) {
+  /* INFO: The pass is recorded as done either way. The later one asks through
+            module_maps_hidden() whether to look at all, and answering "not yet"
+            would send it into a maps read of its own - a forked reader, the
+            most expensive thing either pass does - for a table this process is
+            deliberately leaving alone. */
+  if (!hiding_enabled) {
+    module_maps_were_hidden = true;
+
+    return true;
+  }
+
   struct stat data;
   if (stat("/data", &data) == -1) {
     PLOGE("stat /data");

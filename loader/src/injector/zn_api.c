@@ -9,6 +9,7 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <dobby.h>
+#include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -16,6 +17,7 @@
 #include "elf_util.h"
 #include "logging.h"
 #include "misc.h"
+#include "zn_spawner.h"
 
 #include "zn_api.h"
 #include "zn_loader.h"
@@ -475,39 +477,29 @@ static zn_hyos_setcontext_fn zn_hyos_original_setcontext = NULL;
 static zn_hyos_setname_fn zn_hyos_original_setname = NULL;
 static bool zn_hyos_hooks_warned = false;
 
-/* INFO: The file name HyperOS gives the Rust runtime image. It is looked for in
-         the process maps rather than through /proc/self/exe, and the difference
-         is not cosmetic: on HyperOS the process that hosts the runtime is an
-         app_process binary with this image mapped into it, so its executable
-         name reads app_process64 and the runtime is simply invisible to an exe
-         check. Reading the maps is what the working implementations do, and it
-         is the only thing that finds the spawner on those builds.
+/* INFO: The file name HyperOS gives the Rust runtime image, and the reason it is
+         not the only thing that identifies the spawner, now live in
+         zn_spawner.h - this file only decides which of them to ask.
 
-         An exe check is what this used to do, and it is why getRuntime()
-         answered "no runtime" on a HyperOS 4 device while everything else
-         looked correct - the module side then reported a failed HyperOS
-         runtime injection, and every hook installed for the runtime was
-         installed in a process that had been classified as an ordinary
-         zygote. */
-#define ZN_HYOS_SPAWNER_NAME "hyos_spawner"
-
-static bool zn_hyos_path_is_spawner(const char *path) {
-  size_t len = strip_deleted_suffix(path, strlen(path));
-
-  /* INFO: Compared as a whole path component, so a longer name that merely
-            ends with it (say "hyos_spawner.bak") is not a match, while a build
-            that ships the runtime from another directory still is. */
-  size_t name_len = sizeof(ZN_HYOS_SPAWNER_NAME) - 1;
-  if (len <= name_len) return false;
-  if (path[len - name_len - 1] != '/') return false;
-
-  return memcmp(path + len - name_len, ZN_HYOS_SPAWNER_NAME, name_len) == 0;
-}
+         The history is worth keeping, because the two answers have each been
+         the wrong one on a device at some point. An exe-only check is why
+         getRuntime() answered "no runtime" on a HyperOS 4 build while everything
+         else looked correct: the process hosting the runtime was an app_process
+         binary with the spawner image mapped into it, so its executable name
+         read app_process64. A maps-only check then read as a match in processes
+         that merely had the image inherited, which is why the exe came back.
+         Neither alone is the answer; see zn_spawner.h for why asking both is
+         safe and what each one survives. */
 
 /* INFO: File identity of the spawner's own executable, so its PLT entries
          can be hooked (YukiSU style). Rewriting spawner code in place for an
          inline hook can fail where the image is not writable, while a GOT
-         entry always is. */
+         entry always is.
+
+         The name alone is not enough to accept a mapping: it is what the
+         sibling implementation in YukiZygisk checks, and for the same reason -
+         a path can be spelled the spawner's way while the bytes behind it are
+         something else. */
 static dev_t zn_hyos_spawner_dev = 0;
 static ino_t zn_hyos_spawner_inode = 0;
 
@@ -527,7 +519,15 @@ static bool zn_hyos_spawner_file_identity(dev_t *dev, ino_t *inode) {
     struct map_entry *entry = &maps->maps[i];
 
     if (entry->offset != 0 || entry->inode == 0 || entry->path == NULL) continue;
-    if (!zn_hyos_path_is_spawner(entry->path)) continue;
+    if (!zn_spawner_path_is_image(entry->path, strlen(entry->path))) continue;
+
+    /* INFO: The listing carries mappings this process may not read, and the
+              header below is what decides the question - so the permissions
+              are read first. Dereferencing a PROT_NONE mapping is a segfault
+              in the injected process, which is the one failure mode worse than
+              answering "not the spawner". */
+    if ((entry->perms & PROT_READ) == 0) continue;
+    if (!zn_spawner_elf_is_image((const unsigned char *)entry->start, (size_t)(entry->end - entry->start))) continue;
 
     zn_hyos_spawner_dev = entry->dev;
     zn_hyos_spawner_inode = entry->inode;
@@ -809,42 +809,51 @@ static const struct ZygiskNextRuntime zn_hyos_runtime = {
          is the question the ZN runtime API answers, and the one the injector
          needs before it picks its hook set, so both read it from here.
 
-         The runtime is exposed in the hyos_spawner process tree only: the
-         spawner runs as its own executable and every app it forks carries the
-         same /proc/self/exe, so the executable path identifies the whole tree,
-         and a registration made in the spawner is inherited by every child,
-         which is exactly what the runtime contract wants. */
+         The runtime is exposed in the hyos_spawner process tree only, and a
+         registration made in the spawner is inherited by every child, which is
+         exactly what the runtime contract wants. Which process *is* the spawner
+         is answered from two independent places and either one is enough - the
+         executable's own name, and the image it is mapped from. zn_spawner.h
+         has the reasoning; what this adds is that both are asked, so neither a
+         rename nor an unreadable /proc/self/exe turns the spawner into the
+         branch that installs the JNI hooks. */
 static bool zn_hyos_process_is_spawner(void) {
   static int is_spawner = -1;
 
   if (is_spawner != -1) return is_spawner == 1;
 
-  /* INFO: Answered from the executable's own path, the way the implementation
-           this runtime was ported from answers it: the spawner runs as its own
-           executable, so /proc/self/exe names it directly.
-
-           A mapping scan was tried here first and is not what decides this.
-           The spawner image is mapped in the spawner because it *is* its
-           executable, so the scan only ever re-derived the same answer, while
-           adding ways of its own to say no - a scan that could not be read, or
-           a mapping whose offset was not zero. The scan keeps the one job it is
-           actually needed for: getting the (dev, inode) pair that identifies
-           the image to the PLT hooks. */
   char path[PATH_MAX];
   ssize_t len = read_exe_path((int)getpid(), path, sizeof(path));
 
-  if (len <= 0) {
-    /* INFO: Left uncached on purpose: a failed read is not an answer. */
-    LOGE("HyperOS runtime: cannot read /proc/self/exe");
+  if (len > 0 && zn_spawner_path_is_image(path, (size_t)len)) {
+    is_spawner = 1;
 
-    return false;
+    LOGI("HyperOS runtime: the executable is the spawner (%s)", path);
+
+    return true;
   }
 
-  is_spawner = zn_hyos_path_is_spawner(path) ? 1 : 0;
+  /* INFO: The name did not say so, which is not the same as "no": it is also
+           what an unreadable /proc/self/exe and a build that runs the spawner
+           under another name look like. The image underneath does say so, and
+           it is the answer the sibling implementations take. */
+  dev_t dev = 0;
+  ino_t inode = 0;
 
-  LOGD("HyperOS runtime: %s (exe %s)", is_spawner == 1 ? "spawner" : "not the spawner", path);
+  if (zn_hyos_spawner_file_identity(&dev, &inode)) {
+    is_spawner = 1;
 
-  return is_spawner == 1;
+    LOGI("HyperOS runtime: the spawner image is mapped here (exe %s), taking this process for the spawner",
+         len > 0 ? path : "(unreadable)");
+
+    return true;
+  }
+
+  is_spawner = 0;
+
+  LOGD("HyperOS runtime: not the spawner (exe %s)", len > 0 ? path : "(unreadable)");
+
+  return false;
 }
 
 /* INFO: Remembers which process the runtime belongs to. Called once, in the

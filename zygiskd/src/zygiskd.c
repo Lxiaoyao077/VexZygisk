@@ -1053,6 +1053,17 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
   const char *served[ZN_PLAN_DEDUP_MAX];
   size_t served_len = 0;
 
+  /* INFO: What "why did this process get nothing" needs, and the only place
+           that can answer it: how many module directories were walked, how many
+           of them held a list at all, how many rows those lists had, and how
+           many of those named this process. An empty plan looks the same from
+           the loader whichever of those went wrong, and every one of them has
+           been mistaken for one of the others while this was being chased. */
+  size_t dirs_walked = 0;
+  size_t lists_valid = 0;
+  size_t rows_examined = 0;
+  size_t rows_matched = 0;
+
   struct stat dir_st;
   if (stat(ZYGISK_MODULES_DIR, &dir_st) == -1) {
     LOGE("Failed stating %s: %s", ZYGISK_MODULES_DIR, strerror(errno));
@@ -1064,6 +1075,8 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 
   for (size_t i = 0; i < zn_dir_cache_len; i++) {
     const char *entry_name = zn_dir_cache[i].name;
+
+    dirs_walked++;
 
     char module_dir[PATH_MAX];
     module_dir_path(module_dir, PATH_MAX, entry_name);
@@ -1090,10 +1103,16 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
     struct zn_cached_module *cached = zn_parse_cache_get(entry_name, module_dir, zn_file);
     if (cached == NULL || !cached->valid) continue;
 
+    lists_valid++;
+
     for (size_t row = 0; row < cached->lines_len; row++) {
       struct zn_cached_line *line = &cached->lines[row];
 
+      rows_examined++;
+
       if (!zn_matches_target(line->target, line->is_name, process_name, process_path)) continue;
+
+      rows_matched++;
 
       bool already_served = false;
 
@@ -1148,6 +1167,18 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 
       if (served_len < ZN_PLAN_DEDUP_MAX) served[served_len++] = lib_path_copy;
     }
+  }
+
+  /* INFO: One line, and only when the object it describes is empty and there
+           was something that could have filled it: a process no manifest names
+           is the common case and this runs on every fork, while an empty plan
+           that had material behind it is the one worth reading. The counters
+           are read by the condition and not only by the log on purpose - a
+           release build compiles every LOG* out entirely, which would leave
+           them set but unused, and -Werror is on. */
+  if (*out_len == 0 && rows_matched == 0 && dirs_walked > 0 && lists_valid > 0 && rows_examined > 0) {
+    LOGW("Zygisk Next: no library for \"%s\" - nothing of %zu row(s) in %zu list(s) named it, %zu dir(s) walked",
+         process_name, rows_examined, lists_valid, dirs_walked);
   }
 
   return true;

@@ -91,6 +91,15 @@ cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
    tests/host/test_unmount.c -o /tmp/test_unmount
 /tmp/test_unmount
 
+# INFO: What identifies the HyperOS spawner. The name and the image header are
+#       both text and bytes, and both decide which branch the loader takes in
+#       the spawner - the branch that installs the JNI hooks is the wrong one,
+#       and it is the one that crashed every application it was taken in.
+cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+   -Itests/host -Iloader/src/include \
+   tests/host/test_zn_spawner.c -o /tmp/test_zn_spawner
+/tmp/test_zn_spawner
+
 # INFO: The same parser built the other way: the APatch flavour skips the
 #       loop-device probe and matches module overlays by their /adb/modules
 #       root alone, which is a different branch of carries_root_trace.

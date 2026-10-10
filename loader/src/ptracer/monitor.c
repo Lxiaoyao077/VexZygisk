@@ -585,6 +585,15 @@ static bool should_stop_inject() {
          mistaken for a stale one and killed. */
 #define DAEMON_SETTLE_SECONDS 5
 
+/* INFO: How long the spawner waits for a daemon this monitor could not fork,
+         before it is injected without one. The loader on the other side of that
+         injection waits seconds for the same daemon, so a spawner injected here
+         is not a spawner lost - which is the whole point: the alternative was to
+         skip it, and a skipped spawner means no HyperOS runtime and no Zygisk
+         Next module in that boot. */
+#define SPAWNER_DAEMON_ATTEMPTS 4
+#define SPAWNER_DAEMON_RETRY_US 250000
+
 /* INFO: When the current daemon was forked, on the monotonic clock. */
 static struct timespec daemon_forked_at = {};
 
@@ -1264,17 +1273,22 @@ void sigchld_listener_callback() {
 
             /* INFO: Both targets need the daemon, and the spawner can exec
                      before the zygote ever does, so creating it cannot be left
-                     to the zygote injection. A spawner with no daemon is
-                     skipped rather than fatal: this monitor's job is the
-                     zygote, and stopping here would take a healthy zygote down
-                     with it. */
-            if (!ensure_daemon_created()) {
-              if (is_spawner) {
-                LOGW("VexZygiskd%s not running, skipping hyos_spawner %d", MONITOR_ABI, pid);
+                     to the zygote injection. */
+            bool daemon_ready = ensure_daemon_created();
 
-                break;
-              }
+            /* INFO: The one way that answers false is a fork that failed - the
+                     device was out of memory at the instant the spawner exec'd.
+                     It is retried for the spawner and not for the zygote
+                     because nothing comes after the spawner: the runtime this
+                     injection sets up is what every app of this boot registers
+                     against, and the next chance to install it is the next
+                     boot. */
+            for (int attempt = 0; !daemon_ready && is_spawner && attempt < SPAWNER_DAEMON_ATTEMPTS; attempt++) {
+              usleep(SPAWNER_DAEMON_RETRY_US);
+              daemon_ready = ensure_daemon_created();
+            }
 
+            if (!daemon_ready && !is_spawner) {
               LOGW("VexZygiskd%s not running, stop injecting", MONITOR_ABI);
 
               tracing_state = STOPPING;
@@ -1282,6 +1296,20 @@ void sigchld_listener_callback() {
               ptrace(PTRACE_INTERRUPT, 1, 0, 0);
 
               break;
+            }
+
+            if (!daemon_ready) {
+              /* INFO: The spawner is injected anyway. Skipping it - which is
+                       what this used to do - loses the whole boot's runtime
+                       rather than the one thing the skip was protecting: the
+                       loader waits for the daemon on its side, and the spawner
+                       is the target whose window is measured in seconds
+                       exactly because its daemon may have been forked in the
+                       same breath as its own exec. The cost of being wrong is
+                       that wait; the cost of this was a boot with no HyperOS
+                       runtime and no Zygisk Next module in it. */
+              LOGW("VexZygiskd%s not running, injecting hyos_spawner %d anyway for its loader to wait out",
+                   MONITOR_ABI, pid);
             }
 
             LOGD("Stopping %d (program: %s, tracer: %s)", pid, program, tracer);

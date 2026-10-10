@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <linux/limits.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -90,6 +91,12 @@ static int spawn_companion(const char *lib_path) {
   return rezygiskd_spawn_zn_companion(lib_path);
 }
 
+/* INFO: One companion request per module, made where the module is loaded and
+         nowhere else; the lock is what keeps two threads connecting at the same
+         time from each asking for one, which would leave the companion behind
+         the loser's descriptor with nothing pointing at it. */
+static pthread_mutex_t companion_request_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /* INFO: Failure symmetry, reviewed: every branch that gives up after a
          successful dlopen releases the handle with dlclose and closes the
          handed-over module_fd. Past onModuleLoaded the library is
@@ -149,14 +156,22 @@ static bool load_entry(struct zn_entry *entry, void **lib_handle, int module_fd)
     return false;
   }
 
-  /* INFO: Companions only exist from API v3 onwards. */
-  if (entry->companion) {
-    if (module->target_api_version >= 3) {
-      entry->companion_fd = spawn_companion(entry->lib_path);
-    } else {
-      LOGW("The module [%s] declares a companion but targets API %d (< 3), skipping it", entry->lib_path, module->target_api_version);
-    }
+  /* INFO: Companions only exist from API v3 onwards, and a module that declares
+           one while targeting an older contract is never served: the flag is
+           dropped here, with the one warning, so the connection path has a
+           single question left to answer. */
+  if (entry->companion && module->target_api_version < 3) {
+    LOGW("The module [%s] declares a companion but targets API %d (< 3), skipping it", entry->lib_path, module->target_api_version);
+
+    entry->companion = false;
   }
+
+  /* INFO: Asked for at load time because this is the last moment the process is
+           still privileged enough to reach the daemon the way the daemon's own
+           policy requires; a module that connects from inside the sandbox can
+           only use the descriptor obtained here. See zn_companion_connect() for
+           what happens when this call fails. */
+  if (entry->companion) entry->companion_fd = spawn_companion(entry->lib_path);
 
   LOGD("Loading the Zygisk Next module [%s] targeting %s", entry->lib_path, entry->target);
 
@@ -171,11 +186,27 @@ static bool load_entry(struct zn_entry *entry, void **lib_handle, int module_fd)
 }
 
 /* INFO: Asks the companion behind `handle` for a fresh connection and returns
-         its socket, or -1 when the module has no reachable companion. */
+         its socket, or -1 when the module has no reachable companion.
+
+         The one request that matters was made at load time, and this is where a
+         failure at that moment gets a second chance: the exchange is bounded by
+         the daemon's own timeout, so a daemon that was busy then can leave a
+         module without a companion for its entire life even though nothing is
+         wrong with it. Asking again costs one round trip, and a module that
+         connects from inside the sandbox simply cannot reach the daemon and
+         keeps the answer it had. */
 int zn_companion_connect(void *handle) {
   if (handle == NULL) return -1;
 
   struct zn_entry *entry = (struct zn_entry *)handle;
+  if (!entry->companion) return -1;
+
+  pthread_mutex_lock(&companion_request_lock);
+
+  if (entry->companion_fd < 0) entry->companion_fd = spawn_companion(entry->lib_path);
+
+  pthread_mutex_unlock(&companion_request_lock);
+
   if (entry->companion_fd < 0) return -1;
 
   int sockets[2];

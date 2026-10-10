@@ -112,3 +112,14 @@ cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
    -Itests/host -Izygiskd/src -Izygiskd/src/root_impl \
    tests/host/test_apatch.c -o /tmp/test_apatch
 /tmp/test_apatch
+
+# INFO: The zn_modules.txt reader decides which Zygisk Next libraries a process
+#       gets, and the two details that decide whether a module loads at all -
+#       the ${moduleId} expansion and where `companion` may sit - are pure text,
+#       so they are asserted here instead of being found on a device, where a
+#       manifest that was not understood looks exactly like a module that does
+#       nothing. The reader lives in a header, so this needs nothing else.
+cc -std=c18 -D_GNU_SOURCE -Wall -Wextra -Werror \
+   -Itests/host -Iloader/src/include \
+   tests/host/test_zn_manifest.c -o /tmp/test_zn_manifest
+/tmp/test_zn_manifest

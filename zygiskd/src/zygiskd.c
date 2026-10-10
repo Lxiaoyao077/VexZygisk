@@ -17,6 +17,7 @@
 
 #include "constants.h"
 #include "zygisk_paths.h"
+#include "zn_manifest.h"
 #include "zn_targets.h"
 #include "root_impl/common.h"
 #include "utils.h"
@@ -127,12 +128,15 @@ static void send_zn_module_info(const struct ZnModule *module) {
   }
 }
 
-/* INFO: Reads zn_modules.txt and collects the targets, one per line ("name="
-         or "path=" as the first token), plus whether any line asks for a
-         companion, which is only matched between the target and the library.
-         The daemon is the only side that parses this file: the loader takes the
-         plan over the protocol. */
-static void parse_zn_module_file(const char *module_dir, struct ZnModule *module) {
+/* INFO: Reads zn_modules.txt and collects the targets, one per line, plus whether
+         any line asks for a companion. The daemon is the only side that parses
+         this file: the loader takes the plan over the protocol.
+
+         The reading itself is the shared one, so what the monitor is told a
+         module serves cannot drift from what the plan builder will match a
+         process against - it used to be a second tokenizer, and the two
+         disagreed about a companion flag written after the library. */
+static void parse_zn_module_file(const char *module_id, const char *module_dir, struct ZnModule *module) {
   char zn_path[PATH_MAX];
   snprintf(zn_path, PATH_MAX, "%s/zn_modules.txt", module_dir);
 
@@ -144,40 +148,50 @@ static void parse_zn_module_file(const char *module_dir, struct ZnModule *module
   ssize_t length;
 
   while ((length = getline(&line, &line_capacity, fp)) > 0) {
-    char *tokens[8];
-    size_t token_count = 0;
+    bool is_name = false;
+    bool wants_companion = false;
+    char *target = NULL;
+    char *lib_path = NULL;
 
-    const char *cursor = line;
-    while (*cursor != '\0' && token_count < 8) {
-      while (*cursor != '\0' && isspace((unsigned char)*cursor)) cursor++;
-      if (*cursor == '\0') break;
+    if (!zn_manifest_parse_line(module_id, module_dir, line, &is_name, &target, &wants_companion, &lib_path)) continue;
 
-      const char *start = cursor;
-      while (*cursor != '\0' && !isspace((unsigned char)*cursor)) cursor++;
+    /* INFO: Neither the flag nor the library is this function's business: what
+             the monitor is handed is the target, and which process a target
+             selects is decided where the plan is built.
 
-      size_t token_len = (size_t)(cursor - start);
-      tokens[token_count] = malloc(token_len + 1);
-      if (tokens[token_count] == NULL) break;
-      memcpy(tokens[token_count], start, token_len);
-      tokens[token_count][token_len] = '\0';
+             The prefix goes back on because this list has always held the target
+             the way the manifest wrote it - the reader strips it because that is
+             what the plan builder compares a process against. */
+    const size_t label_len = strlen(target) + ZN_MANIFEST_PREFIX_LEN + 1;
 
-      token_count++;
+    char *label = malloc(label_len);
+    if (label == NULL) {
+      LOGE("Failed copying the target of the Zygisk Next module \"%s\"", module->name);
+
+      free(target);
+
+      continue;
     }
 
-    if (token_count >= 2) {
-      for (size_t i = 1; i + 1 < token_count; i++) {
-        if (strcmp(tokens[i], "companion") == 0) module->companion = true;
-      }
+    memcpy(label, is_name ? "name=" : "path=", ZN_MANIFEST_PREFIX_LEN);
+    memcpy(label + ZN_MANIFEST_PREFIX_LEN, target, strlen(target) + 1);
 
-      char **tmp = realloc(module->targets, (module->targets_len + 1) * sizeof(char *));
-      if (tmp != NULL) {
-        module->targets = tmp;
-        module->targets[module->targets_len++] = tokens[0];
-        tokens[0] = NULL; /* INFO: Ownership moves into the array */
-      }
+    free(target);
+    free(lib_path);
+
+    if (wants_companion) module->companion = true;
+
+    char **tmp = realloc(module->targets, (module->targets_len + 1) * sizeof(char *));
+    if (tmp == NULL) {
+      LOGE("Failed growing the target list of the Zygisk Next module \"%s\"", module->name);
+
+      free(label);
+
+      continue;
     }
 
-    for (size_t i = 0; i < token_count; i++) free(tokens[i]);
+    module->targets = tmp;
+    module->targets[module->targets_len++] = label;
   }
 
   free(line);
@@ -208,7 +222,7 @@ static bool add_zn_module(struct Context *restrict context, const char *name) {
   char module_dir[PATH_MAX];
   module_dir_path(module_dir, PATH_MAX, name);
 
-  parse_zn_module_file(module_dir, module);
+  parse_zn_module_file(name, module_dir, module);
 
   context->zn_len++;
 
@@ -387,77 +401,9 @@ static void free_zn_module_files(struct ZnModuleFile *files, size_t len) {
   free(files);
 }
 
-/* INFO: Splits one zn_modules.txt line, which reads
-         "<name=|path=><target> [companion] <library>". The library is always
-         the last token and "companion" may sit anywhere between the target and
-         it, so only that range is scanned for the flag. */
-static bool parse_zn_line(const char *module_dir, const char *line, bool *is_name, char **target, bool *companion, char **lib_path) {
-  const char *tokens[8];
-  size_t lengths[8];
-  size_t token_count = 0;
-
-  const char *cursor = line;
-  while (*cursor != '\0' && token_count < 8) {
-    while (*cursor != '\0' && isspace((unsigned char)*cursor)) cursor++;
-    if (*cursor == '\0') break;
-
-    const char *start = cursor;
-    while (*cursor != '\0' && !isspace((unsigned char)*cursor)) cursor++;
-
-    tokens[token_count] = start;
-    lengths[token_count] = (size_t)(cursor - start);
-
-    token_count++;
-  }
-
-  if (token_count < 2) return false;
-
-  if (lengths[0] > 5 && strncmp(tokens[0], "name=", 5) == 0) {
-    *is_name = true;
-  } else if (lengths[0] > 5 && strncmp(tokens[0], "path=", 5) == 0) {
-    *is_name = false;
-  } else {
-    return false;
-  }
-
-  size_t target_len = lengths[0] - 5;
-
-  char *parsed_target = malloc(target_len + 1);
-  if (parsed_target == NULL) return false;
-
-  memcpy(parsed_target, tokens[0] + 5, target_len);
-  parsed_target[target_len] = '\0';
-
-  *companion = false;
-  for (size_t i = 1; i + 1 < token_count; i++) {
-    if (lengths[i] == 9 && strncmp(tokens[i], "companion", 9) == 0) *companion = true;
-  }
-
-  const char *library = tokens[token_count - 1];
-  size_t library_len = lengths[token_count - 1];
-
-  char *resolved;
-  if (library[0] == '/') {
-    resolved = strndup(library, library_len);
-  } else {
-    size_t dir_len = strlen(module_dir);
-
-    resolved = malloc(dir_len + library_len + 2);
-    if (resolved != NULL) snprintf(resolved, dir_len + library_len + 2, "%s/%.*s", module_dir, (int)library_len, library);
-  }
-
-  if (resolved == NULL) {
-    free(parsed_target);
-
-    return false;
-  }
-
-  *target = parsed_target;
-  *lib_path = resolved;
-
-  return true;
-}
-
+/* INFO: Whether one parsed manifest row selects this process. `name=` compares
+         the process name, with the zygote-class names standing for the whole
+         family the root solution forks; `path=` compares the executable path. */
 static bool zn_matches_target(const char *target, bool is_name, const char *process_name, const char *process_path) {
   if (is_name) {
     if (zn_target_is_zygote_class(target)) return zn_process_is_zygote_class(process_name);
@@ -897,7 +843,21 @@ static bool zn_parse_cache_read(struct zn_cached_module *module,
     char *target = NULL;
     char *lib_path = NULL;
 
-    if (!parse_zn_line(module_dir, line, &is_name, &target, &companion, &lib_path)) continue;
+    if (!zn_manifest_parse_line(module->dir_name, module_dir, line, &is_name, &target, &companion, &lib_path)) {
+      /* INFO: A line the reader cannot use is worth a word here: a manifest
+               that was never understood is the failure mode that looks like
+               "the module does nothing". Comments are the common unusable line
+               and are skipped without one, so a module's own notes do not fill
+               the log on every fork. */
+      const char *probe = line;
+      while (isspace((unsigned char)*probe)) probe++;
+
+      if (*probe != '\0' && *probe != '#') {
+        LOGD("The Zygisk Next manifest of \"%s\" has a line that cannot be read: %s", module->dir_name, probe);
+      }
+
+      continue;
+    }
 
     char canonical[PATH_MAX];
 

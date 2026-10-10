@@ -127,7 +127,16 @@ void zn_companion_entry(int fd) {
   struct ZygiskNextCompanionModule *module = load_companion_module(library_fd);
   close(library_fd);
 
-  if (module == NULL || module->onCompanionLoaded == NULL || module->onModuleConnected == NULL) {
+  /* INFO: Both callbacks and a companion-capable API version, which is the same
+           gate the loader applies before it asks for a companion at all. The
+           version is not redundant here: a library that exports the symbol but
+           was built against a contract that had no companions would otherwise be
+           answered "ready" and then handed connections it cannot make sense of.
+           YukiZygisk refuses the same pair of versions at this point. */
+  bool usable = module != NULL && module->onCompanionLoaded != NULL && module->onModuleConnected != NULL &&
+                (module->target_api_version == 3 || module->target_api_version == ZYGISK_NEXT_API_VERSION);
+
+  if (!usable) {
     LOGE(" - No usable zn_companion_module in \"%s\"", path);
 
     ret = write_uint8_t(fd, (uint8_t)0);

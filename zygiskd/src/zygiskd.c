@@ -459,14 +459,29 @@ static bool parse_zn_line(const char *module_dir, const char *line, bool *is_nam
   return true;
 }
 
-static bool zn_matches_target(const char *target, bool is_name, const char *process_name, const char *process_path) {
+/* INFO: Whether one manifest line selects this process.
+
+         A name target is answered by the executable's own name, with the
+         zygote-class spelling resolved the way zn_targets.h explains.
+
+         A path target names the executable, which is what /proc/self/exe
+         answers - except on the builds where the HyperOS runtime is hosted by
+         an ART binary and the image the manifest means is mapped into it rather
+         than exec'd. The runtime scan knows that image's path, so the loader
+         hands it over as a second answer, and a target that spells it selects
+         this process whichever file it exec'd. An empty second answer is "there
+         is no second answer", which is every process that does not host the
+         runtime. */
+static bool zn_matches_target(const char *target, bool is_name, const char *process_name, const char *process_path, const char *image_path) {
   if (is_name) {
     if (zn_target_is_zygote_class(target)) return zn_process_is_zygote_class(process_name);
 
     return strcmp(process_name, target) == 0;
   }
 
-  return strcmp(process_path, target) == 0;
+  if (strcmp(process_path, target) == 0) return true;
+
+  return image_path != NULL && image_path[0] != '\0' && strcmp(image_path, target) == 0;
 }
 
 /* INFO: Every exchange the daemon takes part in is bound by this, client
@@ -1042,7 +1057,7 @@ static bool refresh_module_dir_cache(const struct stat *dir_st) {
   return true;
 }
 
-static bool collect_zn_modules(const char *process_name, const char *process_path, struct ZnModuleFile **out, size_t *out_len) {
+static bool collect_zn_modules(const char *process_name, const char *process_path, const char *image_path, struct ZnModuleFile **out, size_t *out_len) {
   *out = NULL;
   *out_len = 0;
 
@@ -1111,7 +1126,7 @@ static bool collect_zn_modules(const char *process_name, const char *process_pat
 
       rows_examined++;
 
-      if (!zn_matches_target(line->target, line->is_name, process_name, process_path)) continue;
+      if (!zn_matches_target(line->target, line->is_name, process_name, process_path, image_path)) continue;
 
       rows_matched++;
 
@@ -1545,10 +1560,22 @@ static void handle_read_zn_modules(struct Client *client) {
     return;
   }
 
+  /* INFO: The path of the HyperOS runtime image, from the process that hosts
+            one. Empty for everything else, including an application the spawner
+            forked: it inherits the runtime state, and inheriting it is not the
+            same as being the spawner. */
+  char image_path[PATH_MAX] = { 0 };
+  ret = read_string(client->fd, image_path, sizeof(image_path));
+  if (ret <= 0) {
+    LOGE("Failed reading the runtime image path for ReadZnModules.");
+
+    return;
+  }
+
   struct ZnModuleFile *files = NULL;
   size_t files_len = 0;
 
-  if (!collect_zn_modules(process_name, process_path, &files, &files_len)) {
+  if (!collect_zn_modules(process_name, process_path, image_path, &files, &files_len)) {
     ret = write_size_t(client->fd, 0);
     ASSURE_SIZE_WRITE("ReadZnModules", "len", ret, sizeof(size_t), return);
 

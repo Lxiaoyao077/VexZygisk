@@ -318,10 +318,16 @@ static void check_initialize(void) {
   g_image[0] = 'X';
 
   CHECK(!zn_hyos_initialize(fake_open_session, fake_report), "a mapping that is not an image was taken for the runtime");
+  CHECK(zn_hyos_image_path()[0] == '\0', "an image path was kept for a runtime that was not found");
 
   reset_fixture();
 
   CHECK(zn_hyos_initialize(fake_open_session, fake_report), "the runtime was not found");
+
+  /* INFO: The image's own path, which is the second answer a path target gets
+            when the executable is not the file the manifest means. */
+  CHECK(strcmp(zn_hyos_image_path(), "/system_ext/bin/hyos_spawner") == 0,
+        "the runtime kept \"%s\" instead of the image's path", zn_hyos_image_path());
   CHECK(zn_hyos_runtime() != NULL, "no runtime was handed out");
   CHECK(zn_hyos_runtime()->type == ZN_RUNTIME_HYOS, "the runtime was handed out with the wrong type");
   CHECK(zn_hyos_runtime()->api_version == ZYGISK_NEXT_HYOS_API_VERSION, "the runtime was handed out with the wrong version");

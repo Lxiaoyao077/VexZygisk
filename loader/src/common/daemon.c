@@ -313,7 +313,7 @@ void free_modules(struct zygisk_modules *modules) {
   modules->modules_count = 0;
 }
 
-bool rezygiskd_read_zn_modules(const char *process_name, const char *process_path, uint8_t retry, uint32_t retry_delay_us, struct zn_module_file **out, size_t *out_len) {
+bool rezygiskd_read_zn_modules(const char *process_name, const char *process_path, const char *image_path, uint8_t retry, uint32_t retry_delay_us, struct zn_module_file **out, size_t *out_len) {
   *out = NULL;
   *out_len = 0;
 
@@ -325,6 +325,15 @@ bool rezygiskd_read_zn_modules(const char *process_name, const char *process_pat
   safe_write(write_uint8_t(fd, (uint8_t)ReadZnModules), "ReadZnModules action", return false);
   safe_write(write_string(fd, process_name), "process name", return false);
   safe_write(write_string(fd, process_path), "process path", return false);
+
+  /* INFO: The path the HyperOS runtime image is mapped from, which is the
+            executable on the builds where the spawner is its own file and the
+            image mapped into an ART host on the ones where it is not. Empty
+            everywhere else, and the daemon treats an empty one as "no second
+            answer" - so a process that merely inherited the runtime state (an
+            application the spawner forked) does not become a match for the
+            spawner's own path target. */
+  safe_write(write_string(fd, image_path != NULL ? image_path : ""), "runtime image path", return false);
 
   size_t len = 0;
   safe_read(read_size_t(fd, &len), "Zygisk Next modules count", return false);

@@ -300,11 +300,11 @@ static bool zn_already_loaded(const char *lib_path) {
          since the daemon opens every file on its behalf. An empty answer is a
          valid answer: a target the daemon has no entry for loads nothing, which
          is also the answer the reference gives. */
-static void load_modules_from_daemon(const char *process_name, const char *process_path, uint8_t connect_retry, uint32_t connect_delay_us) {
+static void load_modules_from_daemon(const char *process_name, const char *process_path, const char *image_path, uint8_t connect_retry, uint32_t connect_delay_us) {
   struct zn_module_file *files = NULL;
   size_t files_len = 0;
 
-  if (!rezygiskd_read_zn_modules(process_name, process_path, connect_retry, connect_delay_us, &files, &files_len)) return;
+  if (!rezygiskd_read_zn_modules(process_name, process_path, image_path, connect_retry, connect_delay_us, &files, &files_len)) return;
 
   LOGD("Got %zu Zygisk Next module(s) from VexZygiskd", files_len);
 
@@ -394,7 +394,13 @@ void zn_load_all_modules(uint8_t connect_retry, uint32_t connect_delay_us) {
 
   const char *process_name = get_process_name(process_path);
 
-  load_modules_from_daemon(process_name, process_path, connect_retry, connect_delay_us);
+  /* INFO: The second answer for a path target is the runtime image, and only
+            in the process that hosts it: an application forked from the
+            spawner inherits the runtime state and would otherwise match the
+            spawner's own path target as well. */
+  const char *image_path = zn_hyos_in_child() ? "" : zn_hyos_image_path();
+
+  load_modules_from_daemon(process_name, process_path, image_path, connect_retry, connect_delay_us);
 
   free(process_path);
 }
@@ -409,7 +415,7 @@ void zn_load_modules_for_process(const char *process_name) {
     return;
   }
 
-  load_modules_from_daemon(process_name, process_path, 1, REZYGISKD_RETRY_DELAY_US);
+  load_modules_from_daemon(process_name, process_path, zn_hyos_in_child() ? "" : zn_hyos_image_path(), 1, REZYGISKD_RETRY_DELAY_US);
 
   free(process_path);
 }

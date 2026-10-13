@@ -88,6 +88,16 @@ int zn_hyos_child_session(void);
          so it can commit against that snapshot instead of reading
          /proc/self/maps again. See zn_lsplt.h. */
 bool zn_hyos_in_child(void);
+const char *zn_hyos_image_path(void);
+
+/* INFO: The path the runtime image is mapped from, or an empty string when this
+         process does not host the runtime.
+
+         It is the executable on the builds where the spawner is its own file,
+         and it is the image mapped into an ART host on the ones where it is not
+         - which is the difference the module plan needs: a manifest target that
+         spells this path is naming this process whichever file it exec'd, and
+         /proc/self/exe alone cannot answer that. */
 
 /* INFO: Tells the runtime which module is being loaded, so a registration made
          from inside that module's onModuleLoaded can be attributed to it. The

@@ -102,7 +102,7 @@ void free_modules(struct zygisk_modules *modules);
          extra attempts after the first, spaced `retry_delay_us` apart, so the
          call makes retry + 1 attempts and waits at most retry * retry_delay_us
          while the daemon is unreachable. */
-bool rezygiskd_read_zn_modules(const char *process_name, const char *process_path, uint8_t retry, uint32_t retry_delay_us, struct zn_module_file **out, size_t *out_len);
+bool rezygiskd_read_zn_modules(const char *process_name, const char *process_path, const char *image_path, uint8_t retry, uint32_t retry_delay_us, struct zn_module_file **out, size_t *out_len);
 
 void free_zn_module_files(struct zn_module_file *files, size_t len);
 

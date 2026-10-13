@@ -128,7 +128,7 @@ static bool zn_hyos_is_child = false;
 
 /* INFO: The path of the image the runtime was found in. Empty until a scan
             finds one, and cleared again when it does not. */
-static char zn_hyos_image_path[PATH_MAX] = { 0 };
+static char zn_hyos_spawner_image[PATH_MAX] = { 0 };
 
 static char zn_hyos_process_name[ZN_HYOS_VALUE_MAX];
 static char zn_hyos_package_name[ZN_HYOS_VALUE_MAX];
@@ -175,7 +175,7 @@ static bool zn_hyos_visit_spawner(const struct map_entry *entry, void *userdata)
   scan->inode = entry->inode;
   scan->start = entry->start;
 
-  const size_t len = strip_deleted_suffix(entry->path, strlen(entry->path));
+  size_t len = strip_deleted_suffix(entry->path, strlen(entry->path));
   if (len >= sizeof(scan->path)) len = sizeof(scan->path) - 1;
   memcpy(scan->path, entry->path, len);
   scan->path[len] = '\0';
@@ -193,7 +193,7 @@ bool zn_hyos_initialize(zn_hyos_open_session_fn open_session, zn_hyos_report_fn 
   zn_hyos_available = false;
   zn_hyos_registration_open = false;
   zn_hyos_hooks_ready = false;
-  zn_hyos_image_path[0] = '\0';
+  zn_hyos_spawner_image[0] = '\0';
   zn_hyos_registration_count = 0;
   zn_hyos_open_session = open_session;
   zn_hyos_report = report;
@@ -205,7 +205,7 @@ bool zn_hyos_initialize(zn_hyos_open_session_fn open_session, zn_hyos_report_fn 
 
   zn_hyos_target_dev = scan.dev;
   zn_hyos_target_inode = scan.inode;
-  memcpy(zn_hyos_image_path, scan.path, sizeof(zn_hyos_image_path));
+  memcpy(zn_hyos_spawner_image, scan.path, sizeof(zn_hyos_spawner_image));
   zn_hyos_available = true;
   zn_hyos_registration_open = true;
 
@@ -459,7 +459,7 @@ bool zn_hyos_in_child(void) {
 }
 
 const char *zn_hyos_image_path(void) {
-  return zn_hyos_image_path;
+  return zn_hyos_spawner_image;
 }
 
 /* INFO: Puts the hooks back the way they were found. Both are registered again
